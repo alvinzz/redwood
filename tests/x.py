@@ -1,4 +1,5 @@
 from generative_model import generate_video
+from viz import viz_phis
 
 # generate_video(
 #     phis,
@@ -16,13 +17,16 @@ from generative_model import generate_video
 import torch
 PHIS_0 = torch.tensor([1], dtype=torch.float32).reshape(
     1, 1, 1, 1, 1)
+viz_phis(PHIS_0, "x/phis0")
 PHIS_1 = torch.tensor([0.9, 0.6, 0.3], dtype=torch.float32).reshape(
     1, 1, 1, 3, 1)
+viz_phis(PHIS_1, "x/phis1")
 PHIS_2 = torch.tensor([
     [0.7, 0.8, 0.9],
     [0.4, 0.5, 0.6],
     [0.1, 0.2, 0.3]], dtype=torch.float32).reshape(
     1, 3, 1, 1, 1, 3, 1)
+viz_phis(PHIS_2, "x/phis2")
 PHIS_3 = torch.tensor([
     [
         [[1, 0.7], [0, 1], [0.7, 0]],
@@ -35,7 +39,7 @@ PHIS_3 = torch.tensor([
         [[0, 1], [0.3, 0], [1, 0.3]]
     ]], dtype=torch.float32).reshape(
     [2, 3, 1, 1, 3, 2])
-# TEST XYROT, XYROTT
+viz_phis(PHIS_3, "x/phis3")
 
 def phis0_alpha1_stride1_a1_mu0_sigma1():
     phis = PHIS_0
@@ -890,4 +894,5 @@ if __name__ == "__main__":
     # phis2_alpha8_stride1_a121212_mu_020002_sigma121212()
     # phis2_alpha8_stride1_a111_mu000_sigma201005()
 
-    phis3_batch_CH_Nx_nphilters()
+    # phis3_batch_CH_Nx_nphilters()
+    pass

@@ -26,8 +26,8 @@ def gauss2d(mu_X, mu_Y, sigma_X, sigma_Y, rot, Z, cutoff=True):
 
     U = torch.zeros([2, 2], dtype=torch.float32)
     U[0, 0] = torch.cos(rot)
-    U[0, 1] = -torch.sin(rot)
-    U[1, 0] = torch.sin(rot)
+    U[0, 1] = torch.sin(rot)
+    U[1, 0] = -torch.sin(rot)
     U[1, 1] = torch.cos(rot)
 
     Inverse_Sigma = torch.matmul(U.T, torch.matmul(Inverse_Lambda, U))
@@ -187,12 +187,15 @@ def generate_video(
 
     if len(phis.shape) == 5:
         phis = phis.unsqueeze(0).unsqueeze(1).unsqueeze(2)
-        phis = phis.repeat(N_y, N_x, CH, 1, 1, 1, 1, 1)
     if len(phis.shape) == 6:
         phis = phis.unsqueeze(0).unsqueeze(1)
-        phis = phis.repeat(N_y, N_x, 1, 1, 1, 1, 1, 1)
     if len(phis.shape) == 7:
         phis = phis.unsqueeze(2)
+    if phis.shape[0] == 1 and N_y > 1:
+        phis = phis.repeat(N_y, 1, 1, 1, 1, 1, 1, 1)
+    if phis.shape[1] == 1 and N_x > 1:
+        phis = phis.repeat(1, N_x, 1, 1, 1, 1, 1, 1)
+    if phis.shape[2] == 1 and CH > 1:
         phis = phis.repeat(1, 1, CH, 1, 1, 1, 1, 1)
     _, _, _, n_philters, t, n_y, n_x, ch = phis.shape
 
@@ -242,8 +245,10 @@ def generate_video(
                                 gauss_sigma_T = alpha_T * this_sigma_T / 2
                                 time_gauss = gauss(gauss_mu_T, gauss_sigma_T, this_sigma_T)
 
-                                min_T = int(np.floor(max(0, gauss_mu_T - np.sqrt(6)*gauss_sigma_T)))
-                                max_T = int(np.ceil(min(T_max, gauss_mu_T + np.sqrt(6)*gauss_sigma_T)))
+                                min_T = int(np.floor(max(0, 
+                                    gauss_mu_T.detach().numpy() - np.sqrt(6)*gauss_sigma_T.detach().numpy())))
+                                max_T = int(np.ceil(min(T_max, 
+                                    gauss_mu_T.detach().numpy() + np.sqrt(6)*gauss_sigma_T.detach().numpy())))
 
                                 phi_spatial_vol = torch.zeros([Y_max, X_max, ch], dtype=torch.float32)
 
@@ -256,9 +261,9 @@ def generate_video(
                                         offset_mu_X = n_x*alpha_X*this_mu_X
 
                                         gauss_mu_Y = center_N_y + offset_mu_Y + \
-                                            np.cos(this_rot)*offset_y - np.sin(this_rot)*offset_x
+                                            torch.cos(this_rot)*offset_y + torch.sin(this_rot)*offset_x
                                         gauss_mu_X = center_N_x + offset_mu_X + \
-                                            np.cos(this_rot)*offset_x + np.sin(this_rot)*offset_y
+                                            torch.cos(this_rot)*offset_x - torch.sin(this_rot)*offset_y
                                         gauss_sigma_Y = alpha_Y * this_sigma_Y / 2
                                         gauss_sigma_X = alpha_X * this_sigma_X / 2
                                         gauss_rot = this_rot
@@ -267,21 +272,21 @@ def generate_video(
                                                                 gauss_rot, this_sigma_X*this_sigma_Y)
 
                                         min_Y = int(np.floor(max(0, 
-                                            gauss_mu_Y - \
-                                                np.sqrt(6) * (np.cos(this_rot)*gauss_sigma_Y + \
-                                                    np.abs(np.sin(this_rot)*gauss_sigma_X)))))
+                                            gauss_mu_Y.detach().numpy() - \
+                                                np.sqrt(6) * (np.cos(this_rot.detach().numpy())*gauss_sigma_Y.detach().numpy() + \
+                                                    np.abs(np.sin(this_rot.detach().numpy())*gauss_sigma_X.detach().numpy())))))
                                         max_Y = int(np.ceil(min(Y_max, 
-                                            gauss_mu_Y + \
-                                                np.sqrt(6) * (np.cos(this_rot)*gauss_sigma_Y + \
-                                                    np.abs(np.sin(this_rot)*gauss_sigma_X)))))
+                                            gauss_mu_Y.detach().numpy() + \
+                                                np.sqrt(6) * (np.cos(this_rot.detach().numpy())*gauss_sigma_Y.detach().numpy() + \
+                                                    np.abs(np.sin(this_rot.detach().numpy())*gauss_sigma_X.detach().numpy())))))
                                         min_X = int(np.floor(max(0, 
-                                            gauss_mu_X - \
-                                                np.sqrt(6) * (np.cos(this_rot)*gauss_sigma_X + \
-                                                    np.abs(np.sin(this_rot)*gauss_sigma_Y)))))
+                                            gauss_mu_X.detach().numpy() - \
+                                                np.sqrt(6) * (np.cos(this_rot.detach().numpy())*gauss_sigma_X.detach().numpy() + \
+                                                    np.abs(np.sin(this_rot.detach().numpy())*gauss_sigma_Y.detach().numpy())))))
                                         max_X = int(np.ceil(min(X_max, 
-                                            gauss_mu_X + \
-                                                np.sqrt(6) * (np.cos(this_rot)*gauss_sigma_X + \
-                                                    np.abs(np.sin(this_rot)*gauss_sigma_Y)))))
+                                            gauss_mu_X.detach().numpy() + \
+                                                np.sqrt(6) * (np.cos(this_rot.detach().numpy())*gauss_sigma_X.detach().numpy() + \
+                                                    np.abs(np.sin(this_rot.detach().numpy())*gauss_sigma_Y.detach().numpy())))))
 
                                         ys, xs = torch.meshgrid(
                                             torch.arange(min_Y, max_Y),
@@ -300,8 +305,6 @@ def generate_video(
 
                             V[b, :, :, :, min_CH:max_CH] += this_a * this_phi_vol
 
-    print(V)
-
     ### PLOTTING ###
     if plot_save_dir is not None:
         try:
@@ -316,8 +319,8 @@ def generate_video(
                 pass
 
             if not RGB:
-                for l in range(CH*ch):
-                    for i in range(T):
+                for l in range(CH_max):
+                    for i in range(T_max):
                         Z = V[b, i, :, :, l].detach()
 
                         fig = plt.figure(figsize=(4, 8))
@@ -349,7 +352,7 @@ def generate_video(
                     os.system("ffmpeg -r 2 -i {}/{}/t_%04d_ch_{:04d}.png {}/{}/ch_{:04d}_vid.mp4".format(
                         plot_save_dir, b, l, plot_save_dir, b, l))
             else:
-                for i in range(T):
+                for i in range(T_max):
                     fig = plt.figure(figsize=(12, 8))
 
                     ax = fig.add_subplot(2, 3, 5)
@@ -379,85 +382,193 @@ def generate_video(
                     os.system("rm {}/{}/vid.mp4".format(plot_save_dir, b))
                 except:
                     pass
-                os.system("ffmpeg -r 2 -i {}/{}/t_%04d.png {}/{}/vid.mp4".format(plot_save_dir, b, plot_save_dir, b))
+                os.system("ffmpeg -r 2 -i {}/{}/t_%04d.png {}/{}/vid.mp4".format(
+                    plot_save_dir, b, plot_save_dir, b))
 
     return V
 
-# def plot_phis(phis, alpha, colors=None):
-#     if len(phis.shape) == 2:
-#         phis = torch.unsqueeze(phis, 0)
-        
-#     n, n_philters, philter_len = phis.shape
+# phis: [[N_y, N_x], [CH], n_philters, t, n_y, n_x, ch]
+    # a: [batch, T, N_y, N_x, [CH], n_philters]
+    # mu_T, mu_Y, mu_X,
+    # sigma_T, sigma_Y, sigma_X,
+    # rot,
+class HierarchicalGenerativeModel(object):
+    def __init__(self,
+        phis_list,
+        alpha_Ts, alpha_Ys, alpha_Xs,
+        stride_Ts, stride_Ys, stride_Xs,
+    ):
+        self.n_layers = len(phis_list)
 
-#     if colors is None:
-#         colors = ["b" for _ in range(n_philters)]
+        for L in range(self.n_layers):
+            phis = phis_list[L]
 
-#     fig = plt.figure(figsize=(2*n, 2*2*n_philters))
-    
-#     for i in range(n):
-#         for j in range(n_philters):
-#             ax = fig.add_subplot(2*n_philters, n, 2*n*j+i+1)
-#             ax.imshow(np.array(phis[i, j]).reshape(1, -1), cmap="gray", vmin=0, vmax=1)
-#             ax.set_title("(x, ch) = ({}, {})".format(i, j))
+            if len(phis.shape) == 5:
+                phis = phis.unsqueeze(0).unsqueeze(1).unsqueeze(2)
+            if len(phis.shape) == 6:
+                phis = phis.unsqueeze(0).unsqueeze(1)
+            if len(phis.shape) == 7:
+                phis = phis.unsqueeze(2)
 
-#             ax = fig.add_subplot(2*n_philters, n, 2*n*j+n+i+1)
-#             Y = get_Y(alpha, stride=1, phis=phis[i, j].reshape(1, 1, -1),
-#                      a=torch.ones(1, 1), mu=torch.zeros(1, 1), sigma=torch.ones(1, 1))
-#             ax.plot(Y.detach(), color=colors[j])
+            phis = phis / (1e-8 + torch.sum(torch.abs(phis.detach()), [4, 5, 6, 7]).unsqueeze(
+                4).unsqueeze(5).unsqueeze(6).unsqueeze(7))
 
-#     plt.show()
+            phis_list[L] = phis
 
-# def plot_coefs(a, mu, log_sigma):
-#     if len(a.shape) == 2:
-#         a = torch.unsqueeze(a, 0)
-#         mu = torch.unsqueeze(mu, 0)
-#         log_sigma = torch.unsqueeze(log_sigma, 0)
+        self.phis_list = phis_list
+        self.n_philters_list = [phis.shape[3] for phis in phis_list]
+        self.alpha_Ts, self.alpha_Ys, self.alpha_Xs = alpha_Ts, alpha_Ys, alpha_Xs
+        self.stride_Ts, self.stride_Ys, self.stride_Xs = stride_Ts, stride_Ys, stride_Xs
 
-#     coef_names = ["a", "mu", "log_sigma"]
-#     coef_colors = ['g', 'r', 'b']
+    def sample(self, n_samples, T, N_y, N_x, CH):
+        pass
+        #TODO: sample then generate
 
-#     t, n, n_philters = a.shape
+    def generate_video(self,
+        coefs_list,
+        phis_list,
+        plot_save_dir=None, RGB=False
+    ):
+        top_down_inp = None
 
-#     if t > 1:
-#         try:
-#             os.system("rm plot_coefs_*.png")
-#         except:
-#             pass
-#         try:
-#             os.system("rm plot_coefs.mp4")
-#         except:
-#             pass
-    
-#     for k in range(t):
-#         fig = plt.figure(figsize=(2*n, 2*n_philters))
-#         plt.xlim(0, n)
-#         plt.ylim(0, n_philters)
-#         plt.xlabel("x")
-#         plt.ylabel("ch")
+        for L in reversed(range(self.n_layers)):
+            if type(coefs_list[L]) == list:
+                coefs_list[L] = torch.stack(coefs_list[L], 0)
 
-#         for i in range(1, n):
-#             plt.plot([i, i], [0, n_philters], color="black", linewidth=5.0)
+            if top_down_inp is not None:
+                coefs_list[L] = coefs_list[L] + top_down_inp
 
-#         max_a = a[k].abs().max()
-#         max_mu = mu[k].abs().max()
-#         max_log_sigma = log_sigma[k].abs().max()
-        
-#         for i in range(n):
-#             for j in range(n_philters):
-#                 ax = fig.add_subplot(n_philters, n, j*n+i+1)
-#                 ax.set_xlim(-1, 3)
-#                 ax.set_ylim(-1.2, 1.2)
-#                 plt.bar(np.arange(3), [a[k, i, j]/max_a, mu[k, i, j]/max_mu, log_sigma[k, i, j]/max_log_sigma], color=coef_colors)
-#                 ax.tick_params(bottom=False, left=False, labelbottom=False, labelleft=False)
-                
-#         fig.tight_layout(pad=0.0)
-#         plt.subplots_adjust(bottom=0.0, left=0.0, right=1.0, top=1.0)
+            a, mu_T, mu_Y, mu_X, sigma_T, sigma_Y, sigma_X, rot = coefs_list[L]
+            if plot_save_dir is not None:
+                L_plot_save_dir = plot_save_dir + "/L_{:04d}".format(L)
+            else:
+                L_plot_save_dir = None
+            out = generate_video(
+                phis_list[L],
+                self.alpha_Ts[L], self.alpha_Ys[L], self.alpha_Xs[L],
+                self.stride_Ts[L], self.stride_Ys[L], self.stride_Xs[L],
+                a, 
+                mu_T,  mu_Y, mu_X,
+                sigma_T, sigma_Y, sigma_X,
+                rot,
+                L_plot_save_dir, RGB and (L==0),
+            )
+            if L >= 1:
+                batch_size, out_T, out_N_y, out_N_x, out_CH = out.shape
+                out = out.reshape(
+                    batch_size, out_T, out_N_y, out_N_x, 
+                    out_CH//(8*self.n_philters_list[L-1]), 8, self.n_philters_list[L-1]).permute(
+                    5, 0, 1, 2, 3, 4, 6)
+                top_down_inp = out
+            else:
+                return out
 
-#         if t == 1:
-#             plt.show()
-#         else:
-#             plt.savefig("plot_coefs_{}.png".format(k))
-#             plt.close()
-    
-#     if t > 1:
-#         os.system("ffmpeg -r 5 -i plot_coefs_%d.png plot_coefs.mp4")
+    def infer_coefs(self,
+        video,
+        phis_list,
+        max_itr=50,
+        rel_grad_stop_cond=0.01,
+        abs_grad_stop_cond=0.01,
+        lr=0.01,
+        warm_start_vars_list=None,
+    ):
+        video = video.type(torch.float32)
+        batch_size, video_T, video_N_y, video_N_x, video_CH = video.shape
+
+        if not warm_start_vars_list:
+            vars_list = []
+            for L in range(self.n_layers):
+                # create variables
+                if L == 0:
+                    next_T, next_N_y, next_N_x, next_CH = video_T, video_N_y, video_N_x, video_CH
+
+                _, _, _, n_philters, t, n_y, n_x, ch = phis_list[L].shape
+                alpha_T, alpha_Y, alpha_X = self.alpha_Ts[L], self.alpha_Ys[L], self.alpha_Xs[L]
+                stride_T, stride_Y, stride_X = self.stride_Ts[L], self.stride_Ys[L], self.stride_Xs[L]
+
+                T = int(np.ceil((next_T/(t*alpha_T) - 1) / stride_T + 1))
+                N_y = int(np.ceil((next_N_y/(n_y*alpha_Y) - 1) / stride_Y + 1))
+                N_x = int(np.ceil((next_N_x/(n_x*alpha_X) - 1) / stride_X + 1))
+                CH = int(np.ceil(next_CH / ch))
+
+                [a, mu_T, mu_Y, mu_X, log_sigma_T, log_sigma_Y, log_sigma_X, raw_rot] = \
+                    [torch.zeros([batch_size, T, N_y, N_x, CH, n_philters],
+                        dtype=torch.float32,
+                        requires_grad=True)
+                    for _ in range(8)]
+
+                vars_list.extend([a, mu_T, mu_Y, mu_X, log_sigma_T, log_sigma_Y, log_sigma_X, raw_rot])
+                next_T, next_N_y, next_N_x, next_CH = T, N_y, N_x, 8*CH*n_philters
+
+                self.coefs_optimizer = torch.optim.Adam(vars_list, lr=lr)
+        else:
+            vars_list = warm_start_vars_list
+
+        detached_phis_list = [phis.detach() for phis in phis_list]
+
+        for itr in range(max_itr):
+            self.coefs_optimizer.zero_grad()
+            coefs_list = self.get_coefs_list(vars_list)
+            gen_video = self.generate_video(coefs_list, detached_phis_list)
+            loss = 1. / batch_size * \
+                (torch.sum(torch.abs(gen_video - video)) + \
+                    torch.sum(torch.stack([
+                        torch.sum(torch.abs(var)) for var in vars_list], 0)))
+            print("coefs itr {}:".format(itr), loss)
+            loss.backward()
+            self.coefs_optimizer.step()
+
+            if all([(torch.abs(var.grad) < abs_grad_stop_cond).all()
+                for var in vars_list]):
+                break
+            if all([(torch.abs(var.grad / (1e-8 + torch.abs(var))) < rel_grad_stop_cond).all()
+                for var in vars_list]):
+                break
+
+        return vars_list, self.get_coefs_list(vars_list)
+
+    def get_coefs_list(self, vars_list):
+        coefs_list = []
+        for L in range(self.n_layers):
+            this_vars = vars_list[8*L:8*(L+1)]
+            coefs_list.append([
+                this_vars[0], # a
+                this_vars[1], # mu_T
+                this_vars[2], # mu_Y
+                this_vars[3], # mu_X
+                torch.exp(this_vars[4]), # sigma_T
+                torch.exp(this_vars[5]), # sigma_Y
+                torch.exp(this_vars[6]), # sigma_X
+                np.pi/4 * torch.tanh(this_vars[7]) # rot
+            ])
+        return coefs_list
+
+    def update_phis(self,
+        video,
+        coefs_list,
+        n_itr=1,
+        lr=0.01,
+        use_warm_start_optimizer=True,
+    ):
+        for L in range(self.n_layers):
+            self.phis_list[L].requires_grad = True
+            for coef in range(8):
+                coefs_list[L][coef] = coefs_list[L][coef].detach()
+
+        if not use_warm_start_optimizer:
+            self.phis_optimizer = torch.optim.Adam(self.phis_list, lr=lr)
+
+        for itr in range(n_itr):
+            self.phis_optimizer.zero_grad()
+            gen_video = self.generate_video(coefs_list, self.phis_list)
+            loss = torch.sum(torch.abs(gen_video - video))
+            print("phis itr {}:".format(itr), loss)
+            loss.backward()
+            self.phis_optimizer.step()
+
+            # normalize
+            for L in range(self.n_layers):
+                # phis: [[N_y, N_x], [CH], n_philters, t, n_y, n_x, ch]
+                self.phis_list[L] = self.phis_list[L].detach() / \
+                    (1e-8 + torch.sum(torch.abs(self.phis_list[L].detach()), [4, 5, 6, 7]).unsqueeze(
+                        4).unsqueeze(5).unsqueeze(6).unsqueeze(7))
