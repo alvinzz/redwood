@@ -20,11 +20,11 @@ def gauss(mu, sigma, Z, cutoff=True):
     return f
 
 def gauss2d(mu_X, mu_Y, sigma_X, sigma_Y, rot, Z, cutoff=True):
-    Inverse_Lambda = torch.zeros([2, 2], dtype=torch.float32)
+    Inverse_Lambda = torch.zeros([2, 2], dtype=torch.float32, device=mu_X.device)
     Inverse_Lambda[0, 0] = sigma_X**(-2)
     Inverse_Lambda[1, 1] = sigma_Y**(-2)
 
-    U = torch.zeros([2, 2], dtype=torch.float32)
+    U = torch.zeros([2, 2], dtype=torch.float32, device=mu_X.device)
     U[0, 0] = torch.cos(rot)
     U[0, 1] = torch.sin(rot)
     U[1, 0] = -torch.sin(rot)
@@ -32,7 +32,7 @@ def gauss2d(mu_X, mu_Y, sigma_X, sigma_Y, rot, Z, cutoff=True):
 
     Inverse_Sigma = torch.matmul(U.T, torch.matmul(Inverse_Lambda, U))
 
-    mu = torch.zeros([2, 1], dtype=torch.float32)
+    mu = torch.zeros([2, 1], dtype=torch.float32, device=mu_X.device)
     mu[0, 0] = mu_X
     mu[1, 0] = mu_Y
 
@@ -207,10 +207,12 @@ def generate_video(
     Y_max = int(np.ceil(n_y*alpha_Y * (stride_Y*(N_y-1) + 1)))
     X_max = int(np.ceil(n_x*alpha_X * (stride_X*(N_x-1) + 1)))
     CH_max = ch*CH
-    V = torch.zeros([batch_size, T_max, Y_max, X_max, CH_max], dtype=torch.float32)
+    V = torch.zeros([batch_size, T_max, Y_max, X_max, CH_max], dtype=torch.float32, device=phis.device)
+    print(V.shape)
 
     for b in range(batch_size):
         for phi in range(n_philters):
+            print(phi)
 
             for i in range(T):
                 center_T = t*alpha_T * (stride_T*i + 0.5)
@@ -226,7 +228,7 @@ def generate_video(
                             #   after deformations and upsampling.
 
                             this_phi = phis[j, k, l, phi]
-                            this_phi_vol = torch.zeros([T_max, Y_max, X_max, ch], dtype=torch.float32)
+                            this_phi_vol = torch.zeros([T_max, Y_max, X_max, ch], dtype=torch.float32, device=phis.device)
 
                             this_a = a[b, i, j, k, l, phi]
                             this_mu_T = mu_T[b, i, j, k, l, phi]
@@ -246,11 +248,11 @@ def generate_video(
                                 time_gauss = gauss(gauss_mu_T, gauss_sigma_T, this_sigma_T)
 
                                 min_T = int(np.floor(max(0, 
-                                    gauss_mu_T.detach().numpy() - np.sqrt(6)*gauss_sigma_T.detach().numpy())))
+                                    (gauss_mu_T.detach() - np.sqrt(6)*gauss_sigma_T.detach()).cpu().numpy())))
                                 max_T = int(np.ceil(min(T_max, 
-                                    gauss_mu_T.detach().numpy() + np.sqrt(6)*gauss_sigma_T.detach().numpy())))
+                                    (gauss_mu_T.detach() + np.sqrt(6)*gauss_sigma_T.detach()).cpu().numpy())))
 
-                                phi_spatial_vol = torch.zeros([Y_max, X_max, ch], dtype=torch.float32)
+                                phi_spatial_vol = torch.zeros([Y_max, X_max, ch], dtype=torch.float32, device=phis.device)
 
                                 for q in range(n_y):
                                     offset_y = alpha_Y*(this_sigma_Y * (q+0.5 - n_y/2))
@@ -272,25 +274,25 @@ def generate_video(
                                                                 gauss_rot, this_sigma_X*this_sigma_Y)
 
                                         min_Y = int(np.floor(max(0, 
-                                            gauss_mu_Y.detach().numpy() - \
-                                                np.sqrt(6) * (np.cos(this_rot.detach().numpy())*gauss_sigma_Y.detach().numpy() + \
-                                                    np.abs(np.sin(this_rot.detach().numpy())*gauss_sigma_X.detach().numpy())))))
+                                            (gauss_mu_Y.detach() - \
+                                                np.sqrt(6) * (torch.cos(this_rot.detach())*gauss_sigma_Y.detach() + \
+                                                    torch.abs(torch.sin(this_rot.detach())*gauss_sigma_X.detach()))).cpu().numpy())))
                                         max_Y = int(np.ceil(min(Y_max, 
-                                            gauss_mu_Y.detach().numpy() + \
-                                                np.sqrt(6) * (np.cos(this_rot.detach().numpy())*gauss_sigma_Y.detach().numpy() + \
-                                                    np.abs(np.sin(this_rot.detach().numpy())*gauss_sigma_X.detach().numpy())))))
+                                            (gauss_mu_Y.detach() + \
+                                                np.sqrt(6) * (torch.cos(this_rot.detach())*gauss_sigma_Y.detach() + \
+                                                    torch.abs(torch.sin(this_rot.detach())*gauss_sigma_X.detach()))).cpu().numpy())))
                                         min_X = int(np.floor(max(0, 
-                                            gauss_mu_X.detach().numpy() - \
-                                                np.sqrt(6) * (np.cos(this_rot.detach().numpy())*gauss_sigma_X.detach().numpy() + \
-                                                    np.abs(np.sin(this_rot.detach().numpy())*gauss_sigma_Y.detach().numpy())))))
+                                            (gauss_mu_X.detach() - \
+                                                np.sqrt(6) * (torch.cos(this_rot.detach())*gauss_sigma_X.detach() + \
+                                                    torch.abs(torch.sin(this_rot.detach())*gauss_sigma_Y.detach()))).cpu().numpy())))
                                         max_X = int(np.ceil(min(X_max, 
-                                            gauss_mu_X.detach().numpy() + \
-                                                np.sqrt(6) * (np.cos(this_rot.detach().numpy())*gauss_sigma_X.detach().numpy() + \
-                                                    np.abs(np.sin(this_rot.detach().numpy())*gauss_sigma_Y.detach().numpy())))))
+                                            (gauss_mu_X.detach() + \
+                                                np.sqrt(6) * (torch.cos(this_rot.detach())*gauss_sigma_X.detach() + \
+                                                    torch.abs(torch.sin(this_rot.detach())*gauss_sigma_Y.detach()))).cpu().numpy())))
 
                                         ys, xs = torch.meshgrid(
-                                            torch.arange(min_Y, max_Y),
-                                            torch.arange(min_X, max_X))
+                                            torch.arange(min_Y, max_Y, dtype=torch.float32, device=phis.device),
+                                            torch.arange(min_X, max_X, dtype=torch.float32, device=phis.device))
                                         ys = ys.reshape(-1)
                                         xs = xs.reshape(-1)
 
@@ -298,7 +300,7 @@ def generate_video(
                                             spatial_gauss(0.5+xs, 0.5+ys).reshape(
                                                 max_Y-min_Y, max_X-min_X).unsqueeze(2)
 
-                                ts = torch.arange(min_T, max_T)
+                                ts = torch.arange(min_T, max_T, dtype=torch.float32, device=phis.device)
                                 this_phi_vol[min_T:max_T] \
                                     += time_gauss(0.5+ts).unsqueeze(1).unsqueeze(2).unsqueeze(3) * \
                                         phi_spatial_vol.unsqueeze(0)
@@ -321,7 +323,7 @@ def generate_video(
             if not RGB:
                 for l in range(CH_max):
                     for i in range(T_max):
-                        Z = V[b, i, :, :, l].detach()
+                        Z = V[b, i, :, :, l].detach().cpu()
 
                         fig = plt.figure(figsize=(4, 8))
 
@@ -356,10 +358,10 @@ def generate_video(
                     fig = plt.figure(figsize=(12, 8))
 
                     ax = fig.add_subplot(2, 3, 5)
-                    ax.imshow(V[b, i, :, :, :3].detach().numpy()[::-1], vmin=0, vmax=1)
+                    ax.imshow(V[b, i, :, :, :3].detach().cpu().numpy()[::-1], vmin=0, vmax=1)
 
                     for l in range(3):
-                        Z = V[b, i, :, :, l].detach()
+                        Z = V[b, i, :, :, l].detach().cpu()
 
                         ax = fig.add_subplot(2, 3, l, projection='3d')
                         ax.set_xlabel("x")
@@ -441,7 +443,7 @@ class HierarchicalGenerativeModel(object):
                 coefs_list[L] = coefs_list[L] + top_down_inp
 
             a, mu_T, mu_Y, mu_X, sigma_T, sigma_Y, sigma_X, rot = coefs_list[L]
-            if plot_save_dir is not None:
+            if (L==0) and (plot_save_dir is not None):
                 L_plot_save_dir = plot_save_dir + "/L_{:04d}".format(L)
             else:
                 L_plot_save_dir = None
@@ -455,6 +457,7 @@ class HierarchicalGenerativeModel(object):
                 rot,
                 L_plot_save_dir, RGB and (L==0),
             )
+            print(out.shape)
             if L >= 1:
                 batch_size, out_T, out_N_y, out_N_x, out_CH = out.shape
                 out = out.reshape(

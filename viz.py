@@ -18,7 +18,7 @@ def viz_phis(phis, plot_save_dir):
         phis = phis.unsqueeze(2)
     N_y, N_x, CH, n_philters, t, n_y, n_x, ch = phis.shape
 
-    phis = phis.detach().numpy()
+    phis = phis.detach().cpu().numpy()
 
     phi_px_size = 20
 
