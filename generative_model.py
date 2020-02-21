@@ -397,8 +397,10 @@ class HierarchicalGenerativeModel(object):
         phis_list,
         alpha_Ts, alpha_Ys, alpha_Xs,
         stride_Ts, stride_Ys, stride_Xs,
+        device,
     ):
         self.n_layers = len(phis_list)
+        self.device = device
 
         for L in range(self.n_layers):
             phis = phis_list[L]
@@ -413,7 +415,7 @@ class HierarchicalGenerativeModel(object):
             phis = phis / (1e-8 + torch.sum(torch.abs(phis.detach()), [4, 5, 6, 7]).unsqueeze(
                 4).unsqueeze(5).unsqueeze(6).unsqueeze(7))
 
-            phis_list[L] = phis
+            phis_list[L] = phis.to(self.device)
 
         self.phis_list = phis_list
         self.n_philters_list = [phis.shape[3] for phis in phis_list]
@@ -494,6 +496,7 @@ class HierarchicalGenerativeModel(object):
                 [a, mu_T, mu_Y, mu_X, log_sigma_T, log_sigma_Y, log_sigma_X, raw_rot] = \
                     [torch.zeros([batch_size, T, N_y, N_x, CH, n_philters],
                         dtype=torch.float32,
+                        device=self.device,
                         requires_grad=True)
                     for _ in range(8)]
 
