@@ -508,9 +508,9 @@ def phis1_batch_CH_Ny_Nx_nphilters():
 )
 
 if __name__ == "__main__":
-    # phis0_base_video()
-    # phis0_base_video_alphat3()
-    # phis0_base_video_alphat3_stridet033()
-    # phis0_base_video_a2_sigmat2()
+    phis0_base_video()
+    phis0_base_video_alphat3()
+    phis0_base_video_alphat3_stridet033()
+    phis0_base_video_a2_sigmat2()
 
     # phis1_batch_CH_Ny_Nx_nphilters()

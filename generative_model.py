@@ -5,16 +5,13 @@ from mpl_toolkits.mplot3d import Axes3D
 import os
 import cv2
 
-# logsigma, tanhmurot, etc.
-# loga?
-
 def gauss(mu, sigma, Z, cutoff=True):
     def f(x):
         k = ((x - mu) / sigma)**2
         g = torch.exp(-0.5 * k) / Z
 
         if cutoff:
-            return torch.where(g >= np.exp(-3.) / Z, g, torch.zeros_like(g))
+            return torch.where(g >= 0.05, g, torch.zeros_like(g))
         return g
 
     return f
@@ -46,7 +43,7 @@ def gauss2d(mu_X, mu_Y, sigma_X, sigma_Y, rot, Z, cutoff=True):
         g = torch.exp(-0.5 * k) / Z
 
         if cutoff:
-            return torch.where(g >= np.exp(-3.) / Z, g, torch.zeros_like(g))
+            return torch.where(g >= 0.05, g, torch.zeros_like(g))
         return g
 
     return f
@@ -208,104 +205,199 @@ def generate_video(
     X_max = int(np.ceil(n_x*alpha_X * (stride_X*(N_x-1) + 1)))
     CH_max = ch*CH
     V = torch.zeros([batch_size, T_max, Y_max, X_max, CH_max], dtype=torch.float32, device=phis.device)
-    print(V.shape)
 
-    for b in range(batch_size):
-        for phi in range(n_philters):
-            print(phi)
+    # centers_T: [T]
+    centers_T = t*alpha_T * \
+        (stride_T*torch.arange(0, T, dtype=torch.float32, device=phis.device) + 0.5)
 
-            for i in range(T):
-                center_T = t*alpha_T * (stride_T*i + 0.5)
-                for j in range(N_y):
-                    center_N_y = n_y*alpha_Y * (stride_Y*j + 0.5)
-                    for k in range(N_x):
-                        center_N_x = n_x*alpha_X * (stride_X*k + 0.5)
-                        for l in range(CH):
-                            min_CH = l*ch
-                            max_CH = (l+1)*ch
+    # gauss_mus_T: [batch, T, N_y, N_x, [CH], n_philters]
+    gauss_mus_T = centers_T.reshape(1, T, 1, 1, 1, 1) + \
+        t*alpha_T*mu_T
+    # offset_t: [batch, T, N_y, N_x, CH, n_philters, t]
+    offset_t = alpha_T*(sigma_T.unsqueeze(6) * \
+        (torch.arange(0, t, dtype=torch.float32, device=phis.device).reshape(
+            1, 1, 1, 1, 1, 1, t)+0.5 - t/2))
+    # gauss_mus_t: [batch, T, N_y, N_x, CH, n_philters, t]
+    gauss_mus_t = gauss_mus_T.unsqueeze(6) + offset_t
+    # gauss_sigmas_t: [batch, T, N_y, N_x, CH, n_philters, t]
+    gauss_sigmas_t = alpha_T * sigma_T.unsqueeze(6) / 2
 
-                            # We can now select a philter and compute its addition to the video
-                            #   after deformations and upsampling.
+    # do gauss calculation, divide results by sigma_T
+    ts = 0.5 + torch.arange(0, T_max, dtype=torch.float32, device=phis.device).reshape(
+        1, 1, 1, 1, 1, 1, 1, T_max)
+    gauss_ts = ((ts - gauss_mus_t.unsqueeze(7)) / (1e-8 + gauss_sigmas_t.unsqueeze(7)))**2
+    gauss_ts = torch.exp(-0.5 * gauss_ts) / (1e-8 + sigma_T.unsqueeze(6).unsqueeze(7))
+    gauss_ts = torch.where(gauss_ts >= 0.05, gauss_ts, torch.zeros_like(gauss_ts))
+    # gauss_ts: [batch, T, N_y, N_x, CH, n_philters, t, T_max]
 
-                            this_phi = phis[j, k, l, phi]
-                            this_phi_vol = torch.zeros([T_max, Y_max, X_max, ch], dtype=torch.float32, device=phis.device)
+    # centers_N_y: [N_y]
+    centers_N_y = n_y*alpha_Y * \
+        (stride_Y*torch.arange(0, N_y, dtype=torch.float32, device=phis.device) + 0.5)
+    # centers_N_x: [N_x]
+    centers_N_x = n_x*alpha_X * \
+        (stride_X*torch.arange(0, N_x, dtype=torch.float32, device=phis.device) + 0.5)
 
-                            this_a = a[b, i, j, k, l, phi]
-                            this_mu_T = mu_T[b, i, j, k, l, phi]
-                            this_sigma_T = sigma_T[b, i, j, k, l, phi]
-                            this_mu_Y = mu_Y[b, i, j, k, l, phi]
-                            this_mu_X = mu_X[b, i, j, k, l, phi]
-                            this_sigma_Y = sigma_Y[b, i, j, k, l, phi]
-                            this_sigma_X = sigma_X[b, i, j, k, l, phi]
-                            this_rot = rot[b, i, j, k, l, phi]
+    # gauss_mus_X: [batch, T, N_y, N_x, [CH], n_philters]
+    gauss_mus_X = centers_N_x.reshape(1, 1, 1, N_x, 1, 1) + \
+        n_x*alpha_X*mu_X
+    # gauss_mus_Y: [batch, T, N_y, N_x, [CH], n_philters]
+    gauss_mus_Y = centers_N_y.reshape(1, 1, N_y, 1, 1, 1) + \
+        n_y*alpha_Y*mu_Y
+    # offset_x: [batch, T, N_y, N_x, CH, n_philters, n_x]
+    offset_x = alpha_X*(sigma_X.unsqueeze(6) * \
+        (torch.arange(0, n_x, dtype=torch.float32, device=phis.device).reshape(
+            1, 1, 1, 1, 1, 1, n_x)+0.5 - n_x/2))
+    # offset_y: [batch, T, N_y, N_x, CH, n_philters, n_y]
+    offset_y = alpha_Y*(sigma_Y.unsqueeze(6) * \
+        (torch.arange(0, n_y, dtype=torch.float32, device=phis.device).reshape(
+            1, 1, 1, 1, 1, 1, n_y)+0.5 - n_y/2))
+    # gauss_mus_x: [batch, T, N_y, N_x, CH, n_philters, n_y, n_x]
+    gauss_mus_x = gauss_mus_X.unsqueeze(6).unsqueeze(7) + \
+        torch.cos(rot).unsqueeze(6).unsqueeze(7)*offset_x.unsqueeze(6) - \
+        torch.sin(rot).unsqueeze(6).unsqueeze(7)*offset_y.unsqueeze(7)
+    # gauss_sigmas_x: [batch, T, N_y, N_x, CH, n_philters, n_y, n_x]
+    gauss_sigmas_x = alpha_X * sigma_X.unsqueeze(6).unsqueeze(7) / 2
+    # gauss_mus_y: [batch, T, N_y, N_x, CH, n_philters, n_y, n_x]
+    gauss_mus_y = gauss_mus_Y.unsqueeze(6).unsqueeze(7) + \
+        torch.sin(rot).unsqueeze(6).unsqueeze(7)*offset_x.unsqueeze(6) + \
+        torch.cos(rot).unsqueeze(6).unsqueeze(7)*offset_y.unsqueeze(7)
+    # gauss_sigmas_y: [batch, T, N_y, N_x, CH, n_philters, n_y, n_x]
+    gauss_sigmas_y = alpha_Y * sigma_Y.unsqueeze(6).unsqueeze(7) / 2
+    # gauss_rot: [batch, T, N_y, N_x, CH, n_philters, n_y, n_x]
+    gauss_rots = rot.unsqueeze(6).unsqueeze(7)
 
-                            for p in range(t):
-                                offset_t = alpha_T*(this_sigma_T * (p+0.5 - t/2))
-                                offset_mu_T = t*alpha_T*this_mu_T
+    # do gauss2d calculation, divide results by sigma_X*sigma_Y
+    ys, xs = torch.meshgrid(
+        0.5 + torch.arange(0, Y_max, dtype=torch.float32, device=phis.device),
+        0.5 + torch.arange(0, X_max, dtype=torch.float32, device=phis.device))
+    ys = ys.reshape(1, 1, 1, 1, 1, 1, 1, 1, -1)
+    xs = xs.reshape(1, 1, 1, 1, 1, 1, 1, 1, -1)
 
-                                gauss_mu_T = center_T + offset_t + offset_mu_T
-                                gauss_sigma_T = alpha_T * this_sigma_T / 2
-                                time_gauss = gauss(gauss_mu_T, gauss_sigma_T, this_sigma_T)
+    u0 = gauss_mus_x.unsqueeze(8) - xs
+    u1 = gauss_mus_y.unsqueeze(8) - ys
+    l1 = 1. / (1e-8 + gauss_sigmas_x**2).unsqueeze(8)
+    l2 = 1. / (1e-8 + gauss_sigmas_y**2).unsqueeze(8)
+    c = torch.cos(gauss_rots).unsqueeze(8)
+    s = torch.sin(gauss_rots).unsqueeze(8)
 
-                                min_T = int(np.floor(max(0, 
-                                    (gauss_mu_T.detach() - np.sqrt(6)*gauss_sigma_T.detach()).cpu().numpy())))
-                                max_T = int(np.ceil(min(T_max, 
-                                    (gauss_mu_T.detach() + np.sqrt(6)*gauss_sigma_T.detach()).cpu().numpy())))
+    gauss_xys = (
+        u0 * (u0*(l1*c**2+l2*s**2) + u1*(l1-l2)*c*s) + \
+        u1 * (u0*(l1-l2)*c*s + u1*(l1*s**2+l2*c**2))
+    ).reshape(batch_size, T, N_y, N_x, CH, n_philters, n_y, n_x, Y_max, X_max)
+    gauss_xys = torch.exp(-0.5 * gauss_xys) / \
+        (1e-8 + (sigma_X*sigma_Y).unsqueeze(6).unsqueeze(7).unsqueeze(8).unsqueeze(9))
+    gauss_xys = torch.where(gauss_xys >= 0.05, gauss_xys, torch.zeros_like(gauss_xys))
+    # gauss_xys: [batch, T, N_y, N_x, CH, n_philters, n_y, n_x, Y_max, X_max]
 
-                                phi_spatial_vol = torch.zeros([Y_max, X_max, ch], dtype=torch.float32, device=phis.device)
+    # gauss_ts: [batch, T, N_y, N_x, CH, n_philters, t, T_max]
+    # gauss_txys: [batch, T, N_y, N_x, CH, n_philters, t, n_y, n_x, T_max, Y_max, X_max]
+    gauss_txys = gauss_xys.unsqueeze(6).unsqueeze(9) * \
+        gauss_ts.unsqueeze(7).unsqueeze(8).unsqueeze(10).unsqueeze(11)
 
-                                for q in range(n_y):
-                                    offset_y = alpha_Y*(this_sigma_Y * (q+0.5 - n_y/2))
-                                    offset_mu_Y = n_y*alpha_Y*this_mu_Y
+    # phis: [[N_y, N_x], [CH], n_philters, t, n_y, n_x, ch]
+    # a: [batch, T, N_y, N_x, [CH], n_philters]
+    V = gauss_txys.unsqueeze(9) * \
+        a.reshape(batch_size, T, N_y, N_x, CH, n_philters, 1, 1, 1, 1, 1, 1, 1) * \
+        phis.reshape(1, 1, N_y, N_x, CH, n_philters, t, n_y, n_x, ch, 1, 1, 1)
+    V = torch.sum(V, [1, 2, 3, 5, 6, 7, 8]).reshape(
+        batch_size, CH*ch, T_max, Y_max, X_max).permute(
+        0, 2, 3, 4, 1)
 
-                                    for r in range(n_x):
-                                        offset_x = alpha_X*(this_sigma_X * (r+0.5 - n_x/2))
-                                        offset_mu_X = n_x*alpha_X*this_mu_X
+    # for b in range(batch_size):
+    #     for phi in range(n_philters):
 
-                                        gauss_mu_Y = center_N_y + offset_mu_Y + \
-                                            torch.cos(this_rot)*offset_y + torch.sin(this_rot)*offset_x
-                                        gauss_mu_X = center_N_x + offset_mu_X + \
-                                            torch.cos(this_rot)*offset_x - torch.sin(this_rot)*offset_y
-                                        gauss_sigma_Y = alpha_Y * this_sigma_Y / 2
-                                        gauss_sigma_X = alpha_X * this_sigma_X / 2
-                                        gauss_rot = this_rot
-                                        spatial_gauss = gauss2d(gauss_mu_X, gauss_mu_Y,
-                                                                gauss_sigma_X, gauss_sigma_Y,
-                                                                gauss_rot, this_sigma_X*this_sigma_Y)
+    #         for i in range(T):
+    #             center_T = t*alpha_T * (stride_T*i + 0.5)
+    #             for j in range(N_y):
+    #                 center_N_y = n_y*alpha_Y * (stride_Y*j + 0.5)
+    #                 for k in range(N_x):
+    #                     center_N_x = n_x*alpha_X * (stride_X*k + 0.5)
+    #                     for l in range(CH):
+    #                         min_CH = l*ch
+    #                         max_CH = (l+1)*ch
 
-                                        min_Y = int(np.floor(max(0, 
-                                            (gauss_mu_Y.detach() - \
-                                                np.sqrt(6) * (torch.cos(this_rot.detach())*gauss_sigma_Y.detach() + \
-                                                    torch.abs(torch.sin(this_rot.detach())*gauss_sigma_X.detach()))).cpu().numpy())))
-                                        max_Y = int(np.ceil(min(Y_max, 
-                                            (gauss_mu_Y.detach() + \
-                                                np.sqrt(6) * (torch.cos(this_rot.detach())*gauss_sigma_Y.detach() + \
-                                                    torch.abs(torch.sin(this_rot.detach())*gauss_sigma_X.detach()))).cpu().numpy())))
-                                        min_X = int(np.floor(max(0, 
-                                            (gauss_mu_X.detach() - \
-                                                np.sqrt(6) * (torch.cos(this_rot.detach())*gauss_sigma_X.detach() + \
-                                                    torch.abs(torch.sin(this_rot.detach())*gauss_sigma_Y.detach()))).cpu().numpy())))
-                                        max_X = int(np.ceil(min(X_max, 
-                                            (gauss_mu_X.detach() + \
-                                                np.sqrt(6) * (torch.cos(this_rot.detach())*gauss_sigma_X.detach() + \
-                                                    torch.abs(torch.sin(this_rot.detach())*gauss_sigma_Y.detach()))).cpu().numpy())))
+    #                         # We can now select a philter and compute its addition to the video
+    #                         #   after deformations and upsampling.
 
-                                        ys, xs = torch.meshgrid(
-                                            torch.arange(min_Y, max_Y, dtype=torch.float32, device=phis.device),
-                                            torch.arange(min_X, max_X, dtype=torch.float32, device=phis.device))
-                                        ys = ys.reshape(-1)
-                                        xs = xs.reshape(-1)
+    #                         this_phi = phis[j, k, l, phi]
+    #                         this_phi_vol = torch.zeros([T_max, Y_max, X_max, ch], dtype=torch.float32, device=phis.device)
 
-                                        phi_spatial_vol[min_Y:max_Y, min_X:max_X] += this_phi[p, q, r] * \
-                                            spatial_gauss(0.5+xs, 0.5+ys).reshape(
-                                                max_Y-min_Y, max_X-min_X).unsqueeze(2)
+    #                         this_a = a[b, i, j, k, l, phi]
+    #                         this_mu_T = mu_T[b, i, j, k, l, phi]
+    #                         this_sigma_T = sigma_T[b, i, j, k, l, phi]
+    #                         this_mu_Y = mu_Y[b, i, j, k, l, phi]
+    #                         this_mu_X = mu_X[b, i, j, k, l, phi]
+    #                         this_sigma_Y = sigma_Y[b, i, j, k, l, phi]
+    #                         this_sigma_X = sigma_X[b, i, j, k, l, phi]
+    #                         this_rot = rot[b, i, j, k, l, phi]
 
-                                ts = torch.arange(min_T, max_T, dtype=torch.float32, device=phis.device)
-                                this_phi_vol[min_T:max_T] \
-                                    += time_gauss(0.5+ts).unsqueeze(1).unsqueeze(2).unsqueeze(3) * \
-                                        phi_spatial_vol.unsqueeze(0)
+    #                         for p in range(t):
+    #                             offset_t = alpha_T*(this_sigma_T * (p+0.5 - t/2))
+    #                             offset_mu_T = t*alpha_T*this_mu_T
 
-                            V[b, :, :, :, min_CH:max_CH] += this_a * this_phi_vol
+    #                             gauss_mu_T = center_T + offset_t + offset_mu_T
+    #                             gauss_sigma_T = alpha_T * this_sigma_T / 2
+    #                             time_gauss = gauss(gauss_mu_T, gauss_sigma_T, this_sigma_T)
+
+    #                             min_T = int(np.floor(max(0, 
+    #                                 (gauss_mu_T.detach() - np.sqrt(6)*gauss_sigma_T.detach()).cpu().numpy())))
+    #                             max_T = int(np.ceil(min(T_max, 
+    #                                 (gauss_mu_T.detach() + np.sqrt(6)*gauss_sigma_T.detach()).cpu().numpy())))
+
+    #                             phi_spatial_vol = torch.zeros([Y_max, X_max, ch], dtype=torch.float32, device=phis.device)
+
+    #                             for q in range(n_y):
+    #                                 offset_y = alpha_Y*(this_sigma_Y * (q+0.5 - n_y/2))
+    #                                 offset_mu_Y = n_y*alpha_Y*this_mu_Y
+
+    #                                 for r in range(n_x):
+    #                                     offset_x = alpha_X*(this_sigma_X * (r+0.5 - n_x/2))
+    #                                     offset_mu_X = n_x*alpha_X*this_mu_X
+
+    #                                     gauss_mu_Y = center_N_y + offset_mu_Y + \
+    #                                         torch.cos(this_rot)*offset_y + torch.sin(this_rot)*offset_x
+    #                                     gauss_mu_X = center_N_x + offset_mu_X + \
+    #                                         torch.cos(this_rot)*offset_x - torch.sin(this_rot)*offset_y
+    #                                     gauss_sigma_Y = alpha_Y * this_sigma_Y / 2
+    #                                     gauss_sigma_X = alpha_X * this_sigma_X / 2
+    #                                     gauss_rot = this_rot
+    #                                     spatial_gauss = gauss2d(gauss_mu_X, gauss_mu_Y,
+    #                                                             gauss_sigma_X, gauss_sigma_Y,
+    #                                                             gauss_rot, this_sigma_X*this_sigma_Y)
+
+    #                                     min_Y = int(np.floor(max(0, 
+    #                                         (gauss_mu_Y.detach() - \
+    #                                             np.sqrt(6) * (torch.cos(this_rot.detach())*gauss_sigma_Y.detach() + \
+    #                                                 torch.abs(torch.sin(this_rot.detach())*gauss_sigma_X.detach()))).cpu().numpy())))
+    #                                     max_Y = int(np.ceil(min(Y_max, 
+    #                                         (gauss_mu_Y.detach() + \
+    #                                             np.sqrt(6) * (torch.cos(this_rot.detach())*gauss_sigma_Y.detach() + \
+    #                                                 torch.abs(torch.sin(this_rot.detach())*gauss_sigma_X.detach()))).cpu().numpy())))
+    #                                     min_X = int(np.floor(max(0, 
+    #                                         (gauss_mu_X.detach() - \
+    #                                             np.sqrt(6) * (torch.cos(this_rot.detach())*gauss_sigma_X.detach() + \
+    #                                                 torch.abs(torch.sin(this_rot.detach())*gauss_sigma_Y.detach()))).cpu().numpy())))
+    #                                     max_X = int(np.ceil(min(X_max, 
+    #                                         (gauss_mu_X.detach() + \
+    #                                             np.sqrt(6) * (torch.cos(this_rot.detach())*gauss_sigma_X.detach() + \
+    #                                                 torch.abs(torch.sin(this_rot.detach())*gauss_sigma_Y.detach()))).cpu().numpy())))
+
+    #                                     ys, xs = torch.meshgrid(
+    #                                         torch.arange(min_Y, max_Y, dtype=torch.float32, device=phis.device),
+    #                                         torch.arange(min_X, max_X, dtype=torch.float32, device=phis.device))
+    #                                     ys = ys.reshape(-1)
+    #                                     xs = xs.reshape(-1)
+
+    #                                     phi_spatial_vol[min_Y:max_Y, min_X:max_X] += this_phi[p, q, r] * \
+    #                                         spatial_gauss(0.5+xs, 0.5+ys).reshape(
+    #                                             max_Y-min_Y, max_X-min_X).unsqueeze(2)
+
+    #                             ts = torch.arange(min_T, max_T, dtype=torch.float32, device=phis.device)
+    #                             this_phi_vol[min_T:max_T] \
+    #                                 += time_gauss(0.5+ts).unsqueeze(1).unsqueeze(2).unsqueeze(3) * \
+    #                                     phi_spatial_vol.unsqueeze(0)
+
+    #                         V[b, :, :, :, min_CH:max_CH] += this_a * this_phi_vol
 
     ### PLOTTING ###
     if plot_save_dir is not None:
@@ -457,7 +549,6 @@ class HierarchicalGenerativeModel(object):
                 rot,
                 L_plot_save_dir, RGB and (L==0),
             )
-            print(out.shape)
             if L >= 1:
                 batch_size, out_T, out_N_y, out_N_x, out_CH = out.shape
                 out = out.reshape(

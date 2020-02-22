@@ -3,6 +3,8 @@ from viz import viz_phis
 
 import torch
 
+device = "cuda"
+
 # a: [batch, T, N_y, N_x, [CH], n_philters]
 # phis: [[N_y, N_x], [CH], n_philters, t, n_y, n_x, ch]
 PHIS_0 = torch.tensor(
@@ -58,28 +60,28 @@ PHIS_1 = torch.tensor(
     8, 1, 1, 1, 3, 3)
 coefs_list = [
     [
-        torch.zeros(1, 1, 1, 3, 1, 3, device="cpu"),
-        torch.zeros(1, 1, 1, 3, 1, 3, device="cpu"),
-        torch.zeros(1, 1, 1, 3, 1, 3, device="cpu"),
-        torch.zeros(1, 1, 1, 3, 1, 3, device="cpu"),
-        torch.ones(1, 1, 1, 3, 1, 3, device="cpu"),
-        torch.ones(1, 1, 1, 3, 1, 3, device="cpu"),
-        torch.ones(1, 1, 1, 3, 1, 3, device="cpu"),
-        torch.zeros(1, 1, 1, 3, 1, 3, device="cpu"),
+        torch.zeros(1, 1, 1, 3, 1, 3, device=device),
+        torch.zeros(1, 1, 1, 3, 1, 3, device=device),
+        torch.zeros(1, 1, 1, 3, 1, 3, device=device),
+        torch.zeros(1, 1, 1, 3, 1, 3, device=device),
+        torch.ones(1, 1, 1, 3, 1, 3, device=device),
+        torch.ones(1, 1, 1, 3, 1, 3, device=device),
+        torch.ones(1, 1, 1, 3, 1, 3, device=device),
+        torch.zeros(1, 1, 1, 3, 1, 3, device=device),
     ],
     [
-        3*torch.ones(1, 1, 1, 1, 8, 1, device="cpu"),
-        torch.zeros(1, 1, 1, 1, 8, 1, device="cpu"),
-        torch.zeros(1, 1, 1, 1, 8, 1, device="cpu"),
-        torch.zeros(1, 1, 1, 1, 8, 1, device="cpu"),
-        torch.ones(1, 1, 1, 1, 8, 1, device="cpu"),
-        torch.ones(1, 1, 1, 1, 8, 1, device="cpu"),
-        torch.ones(1, 1, 1, 1, 8, 1, device="cpu"),
-        torch.zeros(1, 1, 1, 1, 8, 1, device="cpu"),
+        3*torch.ones(1, 1, 1, 1, 8, 1, device=device),
+        torch.zeros(1, 1, 1, 1, 8, 1, device=device),
+        torch.zeros(1, 1, 1, 1, 8, 1, device=device),
+        torch.zeros(1, 1, 1, 1, 8, 1, device=device),
+        torch.ones(1, 1, 1, 1, 8, 1, device=device),
+        torch.ones(1, 1, 1, 1, 8, 1, device=device),
+        torch.ones(1, 1, 1, 1, 8, 1, device=device),
+        torch.zeros(1, 1, 1, 1, 8, 1, device=device),
     ],
 ]
 
-hgm = HGM([PHIS_0, PHIS_1], [1, 1], [1, 1], [1, 1], [1, 1], [1, 1], [1, 1], device="cpu")
+hgm = HGM([PHIS_0, PHIS_1], [1, 1], [1, 1], [1, 1], [1, 1], [1, 1], [1, 1], device=device)
 video = hgm.generate_video(coefs_list, hgm.phis_list, plot_save_dir="hgm/reference/video").detach()
 # torch.save(coefs_list, "hgm/reference/coefs_list.torch")
 # torch.save(hgm.phis_list, "hgm/reference/phis_list.torch")
@@ -88,7 +90,7 @@ video = hgm.generate_video(coefs_list, hgm.phis_list, plot_save_dir="hgm/referen
 # viz_phis(PHIS_1, "hgm/reference/phis1")
 
 # ######### infer coefs + phis, phis starting from reference initialization ###########
-# hgm = HGM([PHIS_0, PHIS_1], [1, 1], [1, 1], [1, 1], [1, 1], [1, 1], [1, 1], device="cpu")
+# hgm = HGM([PHIS_0, PHIS_1], [1, 1], [1, 1], [1, 1], [1, 1], [1, 1], [1, 1], device=device)
 # inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list, max_itr=10)
 # hgm.update_phis(video, inferred_coefs_list, use_warm_start_optimizer=False)
 
@@ -114,7 +116,7 @@ hgm = HGM(
         torch.normal(torch.zeros(50, 1, 1, 3, 20*8), torch.ones(50, 1, 1, 3, 20*8)),
     ],
     [1, 1], [1, 1], [1, 1], [1, 1], [1, 1], [1, 1],
-    device="cpu"
+    device=device
 )
 inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list, max_itr=10)
 hgm.update_phis(video, inferred_coefs_list, use_warm_start_optimizer=False)

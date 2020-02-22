@@ -477,7 +477,7 @@ if __name__ == "__main__":
     # phis0_alpha8_stride1_a05_mux0_muy0_rot0_sigmax1_sigmay05()
     # phis0_alpha8_stride1_a05_mux0_muy0_rotpi4_sigmax1_sigmay05()
     # phis0_alpha8_stride1_a05_mux_0125_muy025_rotpi4_sigmax1_sigmay05()
-    # phis0_alpha8_stride1_a05_mux025_muy_0125_rot_pi6_sigmax05_sigmay1()
+    phis0_alpha8_stride1_a05_mux025_muy_0125_rot_pi6_sigmax05_sigmay1()
     # phis0_tiling()
 
-    phis1_batch_CH_Ny_Nx_nphilters()
+    # phis1_batch_CH_Ny_Nx_nphilters()
