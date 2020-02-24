@@ -118,17 +118,17 @@ hgm = HGM(
     [1, 1], [1, 1], [1, 1], [1, 1], [1, 1], [1, 1],
     device=device
 )
-inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list, max_itr=10)
+inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list, max_itr=100)
 hgm.update_phis(video, inferred_coefs_list, use_warm_start_optimizer=False)
 
 for _ in range(25):
-    inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list, max_itr=10,
-        warm_start_vars_list=inferred_vars_list)
+    inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list, max_itr=100)
     hgm.update_phis(video, inferred_coefs_list, use_warm_start_optimizer=True)
 
-inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list, max_itr=10,
+inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list, max_itr=100,
     warm_start_vars_list=inferred_vars_list)
 hgm.generate_video(inferred_coefs_list, hgm.phis_list, plot_save_dir="hgm/rand_init/video").detach()
+torch.save(inferred_vars_list, "hgm/rand_init/vars_list.torch")
 torch.save(inferred_coefs_list, "hgm/rand_init/coefs_list.torch")
 torch.save(hgm.phis_list, "hgm/rand_init/phis_list.torch")
 # TODO: plot_coefs

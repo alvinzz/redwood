@@ -155,7 +155,7 @@ def viz_phis(phis, plot_save_dir):
                             y_range = phi_px_size*n_y / figheight
 
                             ax = fig.add_axes([x_start, y_start, x_range, y_range])
-                            ax.imshow(phis[j, k, l, phi, p, ::-1, :, c], cmap="gray", vmin=0, vmax=1)
+                            ax.imshow(phis[j, k, l, phi, p, ::-1, :, c], cmap="gray")#, vmin=0, vmax=1)
                             ax.tick_params(bottom=False, left=False, labelbottom=False, labelleft=False)
 
     for l in range(CH):
