@@ -82,7 +82,7 @@ coefs_list = [
 ]
 
 hgm = HGM([PHIS_0, PHIS_1], [1, 1], [1, 1], [1, 1], [1, 1], [1, 1], [1, 1], device=device)
-video = hgm.generate_video(coefs_list, hgm.phis_list, plot_save_dir="hgm/reference/video").detach()
+video = hgm.generate_video(coefs_list, hgm.phis_list, plot_save_dir="hgm/reference/video")[0]
 # torch.save(coefs_list, "hgm/reference/coefs_list.torch")
 # torch.save(hgm.phis_list, "hgm/reference/phis_list.torch")
 # # TODO: plot_coefs
@@ -108,6 +108,8 @@ video = hgm.generate_video(coefs_list, hgm.phis_list, plot_save_dir="hgm/referen
 # viz_phis(hgm.phis_list[0], "hgm/ref_init/phis0")
 # viz_phis(hgm.phis_list[1], "hgm/ref_init/phis1")
 
+# TODO: fix alg so that this works
+
 ######### infer coefs + phis, phis starting from random initialization ###########
 # phis: [[N_y, N_x], [CH], n_philters, t, n_y, n_x, ch]
 hgm = HGM(
@@ -121,16 +123,31 @@ hgm = HGM(
 inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list, max_itr=100)
 hgm.update_phis(video, inferred_coefs_list, use_warm_start_optimizer=False)
 
-for _ in range(25):
+for _ in range(250):
     inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list, max_itr=100)
     hgm.update_phis(video, inferred_coefs_list, use_warm_start_optimizer=True)
 
-inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list, max_itr=100,
-    warm_start_vars_list=inferred_vars_list)
-hgm.generate_video(inferred_coefs_list, hgm.phis_list, plot_save_dir="hgm/rand_init/video").detach()
+inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list, max_itr=100)
+hgm.generate_video(inferred_coefs_list, hgm.phis_list, plot_save_dir="hgm/rand_init/video")
 torch.save(inferred_vars_list, "hgm/rand_init/vars_list.torch")
 torch.save(inferred_coefs_list, "hgm/rand_init/coefs_list.torch")
 torch.save(hgm.phis_list, "hgm/rand_init/phis_list.torch")
 # TODO: plot_coefs
 viz_phis(hgm.phis_list[0], "hgm/rand_init/phis0")
 # viz_phis(hgm.phis_list[1], "hgm/rand_init/phis1")
+
+# mean all, 250 itr, coefs no aux, phis aux
+# tensor(15.3973, device='cuda:0', grad_fn=<SumBackward0>)
+# tensor(0.7935, device='cuda:0', grad_fn=<SumBackward0>)
+
+# 250 itr, coefs sum no aux, phis mean aux
+# tensor(2.3659, device='cuda:0', grad_fn=<SumBackward0>)
+# tensor(1.9482, device='cuda:0', grad_fn=<SumBackward0>)
+
+# 250 itr, coefs sum (aux mean), phis mean aux
+# tensor(2.1947, device='cuda:0', grad_fn=<SumBackward0>)
+# tensor(1.6806, device='cuda:0', grad_fn=<SumBackward0>)
+
+# 250 itr, coefs sum no aux, phis sum aux
+# tensor(3.2806, device='cuda:0', grad_fn=<SumBackward0>)
+# tensor(0.0504, device='cuda:0', grad_fn=<SumBackward0>)

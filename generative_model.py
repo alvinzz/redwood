@@ -524,6 +524,8 @@ class HierarchicalGenerativeModel(object):
     ):
         top_down_inp = None
 
+        videos = []
+
         for L in reversed(range(self.n_layers)):
             if type(coefs_list[L]) == list:
                 coefs_list[L] = torch.stack(coefs_list[L], 0)
@@ -547,15 +549,19 @@ class HierarchicalGenerativeModel(object):
                 L_plot_save_dir, RGB and (L==0),
                 use_sparse,
             )
+
             if L >= 1:
                 batch_size, out_T, out_N_y, out_N_x, out_CH = out.shape
                 out = out.view(
                     batch_size, out_T, out_N_y, out_N_x, 
                     out_CH//(8*self.n_philters_list[L-1]), 8, self.n_philters_list[L-1]).permute(
                     5, 0, 1, 2, 3, 4, 6)
+                videos.append(out)
                 top_down_inp = out
             else:
-                return out
+                videos.append(out)
+
+        return list(reversed(videos))
 
     def infer_coefs(self,
         video,
@@ -567,7 +573,7 @@ class HierarchicalGenerativeModel(object):
         lr=0.001,
         warm_start_vars_list=None,
     ):
-        video = video.type(torch.float32)
+        video = video.type(torch.float32).detach().to(self.device)
         batch_size, video_T, video_N_y, video_N_x, video_CH = video.shape
 
         if not warm_start_vars_list:
@@ -593,10 +599,10 @@ class HierarchicalGenerativeModel(object):
                         requires_grad=True)
                     for _ in range(8)]
 
-                vars_list.extend([a, mu_T, mu_Y, mu_X, log_sigma_T, log_sigma_Y, log_sigma_X, raw_rot])
+                vars_list.append([a, mu_T, mu_Y, mu_X, log_sigma_T, log_sigma_Y, log_sigma_X, raw_rot])
                 next_T, next_N_y, next_N_x, next_CH = T, N_y, N_x, 8*CH*n_philters
 
-                self.coefs_optimizer = torch.optim.Adam(vars_list, lr=lr)
+                self.coefs_optimizers = [torch.optim.Adam(v, lr=lr) for v in vars_list]
         else:
             vars_list = warm_start_vars_list
 
@@ -604,22 +610,36 @@ class HierarchicalGenerativeModel(object):
 
         import tqdm
         for itr in tqdm.tqdm(range(max_itr)):
-            self.coefs_optimizer.zero_grad()
+            # TODO: adjust vars blockwise?
+            for optim in self.coefs_optimizers:
+                optim.zero_grad()
+
             coefs_list = self.get_coefs_list(vars_list)
-            gen_video = self.generate_video(coefs_list, detached_phis_list, use_sparse=use_sparse)
-            loss = 1. / batch_size * \
-                (torch.sum(torch.abs(gen_video - video)) + \
-                    torch.sum(torch.stack([
-                        (2**-(1 + L//8)) * torch.sum(torch.abs(var)) for (L, var) in enumerate(vars_list)], 0)))
+            gen_videos = self.generate_video(coefs_list, detached_phis_list, use_sparse=use_sparse)
+
+            loss = torch.sum(torch.abs(gen_videos[0] - video)) + \
+                torch.sum(torch.stack([2**-L * torch.sum(torch.abs(torch.stack(vars_list[L-1], 0))) for L in range(1, self.n_layers+1)]))
+
+            # use auxillary loss?
+            if False:
+                for L in range(1, self.n_layers):
+                    loss += 2**-L * torch.mean(torch.abs(gen_videos[L] - (gen_videos[L] + coefs_list[L-1]).detach()))
+
+            loss /= batch_size
+
             print("coefs itr {}:".format(itr), loss)
             loss.backward()
-            self.coefs_optimizer.step()
+            for optim in self.coefs_optimizers:
+                optim.step()
 
-            if all([(torch.abs(var.grad) < abs_grad_stop_cond).all()
-                for var in vars_list]):
+            var_grads_list = []
+            for L in range(self.n_layers):
+                var_grads_list.append(torch.stack([v.grad for v in vars_list[L]], 0))
+
+            if all([(torch.abs(var_grad) < abs_grad_stop_cond).all() for var_grad in var_grads_list]):
                 break
-            if all([(torch.abs(var.grad / (1e-8 + torch.abs(var))) < rel_grad_stop_cond).all()
-                for var in vars_list]):
+            if all([(torch.abs(var_grad) / (1e-8 + torch.abs(torch.stack(var, 0))) < rel_grad_stop_cond).all()
+                for (var, var_grad) in zip(vars_list, var_grads_list)]):
                 break
 
         return vars_list, self.get_coefs_list(vars_list)
@@ -627,18 +647,35 @@ class HierarchicalGenerativeModel(object):
     def get_coefs_list(self, vars_list):
         coefs_list = []
         for L in range(self.n_layers):
-            this_vars = vars_list[8*L:8*(L+1)]
             coefs_list.append([
-                this_vars[0], # a
-                this_vars[1], # mu_T
-                this_vars[2], # mu_Y
-                this_vars[3], # mu_X
-                torch.exp(this_vars[4]), # sigma_T
-                torch.exp(this_vars[5]), # sigma_Y
-                torch.exp(this_vars[6]), # sigma_X
-                np.pi/4 * torch.tanh(this_vars[7]) # rot
+                vars_list[L][0], # a
+                vars_list[L][1], # mu_T
+                vars_list[L][2], # mu_Y
+                vars_list[L][3], # mu_X
+                torch.exp(vars_list[L][4]), # sigma_T
+                torch.exp(vars_list[L][5]), # sigma_Y
+                torch.exp(vars_list[L][6]), # sigma_X
+                np.pi/4 * torch.tanh(vars_list[L][7]) # rot
             ])
         return coefs_list
+
+    def get_vars_list(self, coefs_list):
+        vars_list = []
+        for L in range(self.n_layers):
+            vars_list.append([
+                coefs_list[L][0], # a
+                coefs_list[L][1], # mu_T
+                coefs_list[L][2], # mu_Y
+                coefs_list[L][3], # mu_X
+                torch.log(coefs_list[L][4]), # sigma_T
+                torch.log(coefs_list[L][5]), # sigma_Y
+                torch.log(coefs_list[L][6]), # sigma_X
+                self.inverse_tanh(4/np.pi * coefs_list[L][7]) # rot
+            ])
+        return vars_list
+
+    def inverse_tanh(self, x):
+        return 0.5 * torch.log((1+x) / (1-x))
 
     def update_phis(self,
         video,
@@ -648,6 +685,8 @@ class HierarchicalGenerativeModel(object):
         lr=0.01,
         use_warm_start_optimizer=True,
     ):
+        video = video.type(torch.float32).detach().to(self.device)
+
         for L in range(self.n_layers):
             self.phis_list[L].requires_grad = True
             for coef in range(8):
@@ -656,22 +695,29 @@ class HierarchicalGenerativeModel(object):
         if not use_warm_start_optimizer:
             self.phis_optimizer = torch.optim.Adam(self.phis_list, lr=lr)
 
-        print("before", self.phis_list[0])
         for itr in range(n_itr):
             self.phis_optimizer.zero_grad()
-            gen_video = self.generate_video(coefs_list, self.phis_list, use_sparse=use_sparse)
-            loss = torch.mean(torch.abs(gen_video - video))
+            gen_videos = self.generate_video(coefs_list, self.phis_list, use_sparse=use_sparse)
+            loss = torch.mean(torch.abs(gen_videos[0] - video))
+            if True:
+                for L in range(1, self.n_layers):
+                    loss += 2**-L * torch.mean(torch.abs(gen_videos[L] - (gen_videos[L] + coefs_list[L-1]).detach()))
             print("phis itr {}:".format(itr), loss)
             loss.backward()
-            # print(self.phis_list[0].grad)
+
+
+            phis_plus_grad_list = [phis.detach() + phis.grad for phis in self.phis_list]
+            phis_plus_grad_list = [phis / (1e-8 + torch.sum(torch.abs(phis), [4, 5, 6, 7]).unsqueeze(4).unsqueeze(5).unsqueeze(6).unsqueeze(7)) for phis in phis_plus_grad_list]
+            directional_grads_list = [phis_plus_grad - phis.detach() for (phis_plus_grad, phis) in zip(phis_plus_grad_list, self.phis_list)]
+            for (phis, directional_grad) in zip(self.phis_list, directional_grads_list):
+                phis.grad = directional_grad
+
             self.phis_optimizer.step()
 
-            print("after1", self.phis_list[0])
-
-            # normalize
+            # normalize (in-place, so that optimizer still points to the correct vars)
             for L in range(self.n_layers):
                 # phis: [[N_y, N_x], [CH], n_philters, t, n_y, n_x, ch]
-                self.phis_list[L] = self.phis_list[L].detach() / \
-                    (1e-8 + torch.sum(torch.abs(self.phis_list[L].detach()), [4, 5, 6, 7]).unsqueeze(
+                self.phis_list[L].requires_grad = False
+                self.phis_list[L] /= \
+                    (1e-8 + torch.sum(torch.abs(self.phis_list[L]), [4, 5, 6, 7]).unsqueeze(
                         4).unsqueeze(5).unsqueeze(6).unsqueeze(7))
-        print("after2", self.phis_list[0])

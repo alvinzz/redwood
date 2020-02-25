@@ -32,8 +32,8 @@ import tqdm
 
 hgm = HGM(
     [
-        torch.normal(torch.zeros(20, 1, 10, 10, 1), torch.ones(20, 1, 10, 10, 1)),
-        torch.normal(torch.zeros(20, 1, 10, 10, 160), torch.ones(20, 1, 10, 10, 160)),
+        torch.normal(torch.zeros(50, 1, 10, 10, 1), torch.ones(50, 1, 10, 10, 1)),
+        torch.normal(torch.zeros(20, 1, 10, 10, 400), torch.ones(20, 1, 10, 10, 400)),
     ],
     [1, 1], [1, 1], [1, 1],
     [1, 1], [2/10, 1], [2/10, 1],
