@@ -151,3 +151,11 @@ viz_phis(hgm.phis_list[0], "hgm/rand_init/phis0")
 # 250 itr, coefs sum no aux, phis sum aux
 # tensor(3.2806, device='cuda:0', grad_fn=<SumBackward0>)
 # tensor(0.0504, device='cuda:0', grad_fn=<SumBackward0>)
+
+# 250 itr, coefs sum no aux, phis mean aux, lr=0.01, stop_conds=0.005
+# tensor(3.8113, device='cuda:0', grad_fn=<SumBackward0>)
+# tensor(1.0491, device='cuda:0', grad_fn=<SumBackward0>)
+
+# 250 itr, coefs sum no aux, phis mean aux, lr=0.001, stop_conds=0.0005
+# tensor(2.0708, device='cuda:0', grad_fn=<SumBackward0>)
+# tensor(2.0677, device='cuda:0', grad_fn=<SumBackward0>)

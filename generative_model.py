@@ -331,11 +331,6 @@ def generate_video(
             sparse_u1 * (sparse_u0*(sparse_l1-sparse_l2)*sparse_c*sparse_s + sparse_u1*(sparse_l1*sparse_s**2+sparse_l2*sparse_c**2))
         sparse_gauss_vs = torch.exp(-0.5 * sparse_gauss_ks) / (1e-8 + sparse_Zs)
         sparse_gauss_vs = torch.where(sparse_gauss_vs >= np.exp(-3.) / (1e-8 + sparse_Zs), sparse_gauss_vs, torch.zeros_like(sparse_gauss_vs))
-        gauss_vs = torch.sparse.FloatTensor(
-            sparse_inds.to(phis.device),
-            sparse_gauss_vs,
-            torch.Size([batch_size, T, N_y, N_x, CH, n_philters, t, n_y, n_x, T_max, Y_max, X_max])
-        ).to_dense()
 
         sparse_as = a[sparse_inds[0], sparse_inds[1], sparse_inds[2], sparse_inds[3], sparse_inds[4], sparse_inds[5]]
         sparse_phis = phis[sparse_inds[2], sparse_inds[3], sparse_inds[4], sparse_inds[5], sparse_inds[6], sparse_inds[7], sparse_inds[8]]
@@ -568,8 +563,8 @@ class HierarchicalGenerativeModel(object):
         phis_list,
         use_sparse=True,
         max_itr=50,
-        rel_grad_stop_cond=0.01,
-        abs_grad_stop_cond=0.01,
+        rel_grad_stop_cond=0.0005,
+        abs_grad_stop_cond=0.0005,
         lr=0.001,
         warm_start_vars_list=None,
     ):
@@ -617,30 +612,32 @@ class HierarchicalGenerativeModel(object):
             coefs_list = self.get_coefs_list(vars_list)
             gen_videos = self.generate_video(coefs_list, detached_phis_list, use_sparse=use_sparse)
 
-            loss = torch.sum(torch.abs(gen_videos[0] - video)) + \
-                torch.sum(torch.stack([2**-L * torch.sum(torch.abs(torch.stack(vars_list[L-1], 0))) for L in range(1, self.n_layers+1)]))
-
-            # use auxillary loss?
-            if False:
-                for L in range(1, self.n_layers):
-                    loss += 2**-L * torch.mean(torch.abs(gen_videos[L] - (gen_videos[L] + coefs_list[L-1]).detach()))
-
+            loss = torch.sum(torch.abs(gen_videos[0] - video))
+            for L in range(1, self.n_layers+1):
+                loss += 2**-L * torch.sum(torch.abs(torch.stack(vars_list[L-1], 0)))
             loss /= batch_size
 
             print("coefs itr {}:".format(itr), loss)
             loss.backward()
+            old_vars_list = [[v.clone() for v in var] for var in vars_list]
             for optim in self.coefs_optimizers:
                 optim.step()
 
-            var_grads_list = []
-            for L in range(self.n_layers):
-                var_grads_list.append(torch.stack([v.grad for v in vars_list[L]], 0))
+            if all([(torch.abs(torch.stack(old_var, 0) - torch.stack(var, 0)) < abs_grad_stop_cond).all() for (old_var, var) in zip(old_vars_list, vars_list)]):
+                break
+            if all([(torch.abs(torch.stack(old_var, 0) - torch.stack(var, 0)) / (1e-8 + torch.abs(torch.stack(var, 0))) < rel_grad_stop_cond).all()
+                for (old_var, var) in zip(old_vars_list, vars_list)]):
+                break
 
-            if all([(torch.abs(var_grad) < abs_grad_stop_cond).all() for var_grad in var_grads_list]):
-                break
-            if all([(torch.abs(var_grad) / (1e-8 + torch.abs(torch.stack(var, 0))) < rel_grad_stop_cond).all()
-                for (var, var_grad) in zip(vars_list, var_grads_list)]):
-                break
+            # var_grads_list = []
+            # for L in range(self.n_layers):
+            #     var_grads_list.append(torch.stack([v.grad for v in vars_list[L]], 0))
+
+            # if all([(lr*torch.abs(var_grad) < abs_grad_stop_cond).all() for var_grad in var_grads_list]):
+            #     break
+            # if all([(lr*torch.abs(var_grad) / (1e-8 + torch.abs(torch.stack(var, 0))) < rel_grad_stop_cond).all()
+            #     for (var, var_grad) in zip(vars_list, var_grads_list)]):
+            #     break
 
         return vars_list, self.get_coefs_list(vars_list)
 
