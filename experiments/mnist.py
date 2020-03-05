@@ -41,12 +41,32 @@ hgm = HGM(
 )
 
 for batch_idx, (data, target) in tqdm.tqdm(enumerate(train_loader)):
+
     data, target = data.to(device), target.to(device)
     video = data.permute(0, 2, 3, 1).unsqueeze(1) # [batch, T, N_y, N_x, CH]
 
     print("batch_idx:", batch_idx)
     inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list, max_itr=250, use_sparse=True)
-    hgm.update_phis(video, inferred_coefs_list, use_warm_start_optimizer=(batch_idx > 0), use_sparse=True)
+    hgm.update_phis(video, inferred_coefs_list, use_warm_start_optimizer=(batch_idx > 1), use_sparse=True)
 
     torch.save(hgm.phis_list, "mnist/phis_list_{}.torch".format(batch_idx))
     torch.save(inferred_coefs_list, "mnist/inferred_coefs_list_{}.torch".format(batch_idx))
+
+    continue
+
+    if batch_idx < 3:
+        pass
+
+    if batch_idx == 3:
+        hgm.phis_list = torch.load(open("mnist/phis_list_3.torch", "rb"))
+
+    if batch_idx > 3:
+        data, target = data.to(device), target.to(device)
+        video = data.permute(0, 2, 3, 1).unsqueeze(1) # [batch, T, N_y, N_x, CH]
+
+        print("batch_idx:", batch_idx)
+        inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list, max_itr=250, use_sparse=True)
+        hgm.update_phis(video, inferred_coefs_list, use_warm_start_optimizer=(batch_idx > 3+1), use_sparse=True)
+
+        torch.save(hgm.phis_list, "mnist/phis_list_{}.torch".format(batch_idx))
+        torch.save(inferred_coefs_list, "mnist/inferred_coefs_list_{}.torch".format(batch_idx))

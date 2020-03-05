@@ -121,7 +121,7 @@ def generate_video(
             RGB:
                 Whether or not to combine the first 3 channels into an RGB image instead of
                     plotting each channel separately.
-    
+
     OUTPUTS:
         A video of dimension [batch, ~T*t*alpha_T*stride_T, ~N_y*y*alpha_Y*stride_Y, 
             ~N_x*x*alpha_X*stride_X, CH*ch]. (Approximate values due to rounding & stride.)
@@ -343,6 +343,14 @@ def generate_video(
         sparse_V = torch.sparse.sum(sparse_V, [1, 2, 3, 5, 6, 7, 8])
         V = sparse_V.to_dense().permute(0, 2, 3, 4, 1, 5).reshape(batch_size, T_max, Y_max, X_max, CH*ch)
 
+        #del centers_T, centers_N_y, centers_N_x, \
+        #    gauss_mus_T, gauss_mus_Y, gauss_mus_X, \
+        #    offset_t, offset_y, offset_x, \
+        #    gauss_mus_t, gauss_mus_y, gauss_mus_x, \
+        #    gauss_sigmas_t, gauss_sigmas_y, gauss_sigmas_x, \
+        #    gauss_rots
+        #torch.cuda.empty_cache()
+
     else: # not use_sparse
         # do gauss2d calculation, divide results by sigma_X*sigma_Y
         ys, xs = torch.meshgrid(
@@ -473,10 +481,7 @@ def generate_video(
     return V
 
 # phis: [[N_y, N_x], [CH], n_philters, t, n_y, n_x, ch]
-    # a: [batch, T, N_y, N_x, [CH], n_philters]
-    # mu_T, mu_Y, mu_X,
-    # sigma_T, sigma_Y, sigma_X,
-    # rot,
+# a: [batch, T, N_y, N_x, [CH], n_philters]
 class HierarchicalGenerativeModel(object):
     def __init__(self,
         phis_list,
@@ -497,7 +502,7 @@ class HierarchicalGenerativeModel(object):
             if len(phis.shape) == 7:
                 phis = phis.unsqueeze(2)
 
-            phis = phis / (1e-8 + torch.sum(torch.abs(phis.detach()), [4, 5, 6, 7]).unsqueeze(
+            phis = phis / (1e-8 + torch.sqrt(torch.sum(phis.detach()**2, [4, 5, 6, 7])).unsqueeze(
                 4).unsqueeze(5).unsqueeze(6).unsqueeze(7))
 
             phis_list[L] = phis.to(self.device)
@@ -525,10 +530,11 @@ class HierarchicalGenerativeModel(object):
             if type(coefs_list[L]) == list:
                 coefs_list[L] = torch.stack(coefs_list[L], 0)
 
+            total_inp = coefs_list[L].clone()
             if top_down_inp is not None:
-                coefs_list[L] = coefs_list[L] + top_down_inp
+                total_inp += top_down_inp
 
-            a, mu_T, mu_Y, mu_X, sigma_T, sigma_Y, sigma_X, rot = coefs_list[L]
+            a, mu_T, mu_Y, mu_X, sigma_T, sigma_Y, sigma_X, rot = total_inp
             if (L==0) and (plot_save_dir is not None):
                 L_plot_save_dir = plot_save_dir + "/L_{:04d}".format(L)
             else:
@@ -537,7 +543,7 @@ class HierarchicalGenerativeModel(object):
                 phis_list[L],
                 self.alpha_Ts[L], self.alpha_Ys[L], self.alpha_Xs[L],
                 self.stride_Ts[L], self.stride_Ys[L], self.stride_Xs[L],
-                a, 
+                a,
                 mu_T,  mu_Y, mu_X,
                 sigma_T, sigma_Y, sigma_X,
                 rot,
@@ -548,7 +554,7 @@ class HierarchicalGenerativeModel(object):
             if L >= 1:
                 batch_size, out_T, out_N_y, out_N_x, out_CH = out.shape
                 out = out.view(
-                    batch_size, out_T, out_N_y, out_N_x, 
+                    batch_size, out_T, out_N_y, out_N_x,
                     out_CH//(8*self.n_philters_list[L-1]), 8, self.n_philters_list[L-1]).permute(
                     5, 0, 1, 2, 3, 4, 6)
                 videos.append(out)
@@ -563,9 +569,9 @@ class HierarchicalGenerativeModel(object):
         phis_list,
         use_sparse=True,
         max_itr=50,
-        rel_grad_stop_cond=0.0005,
-        abs_grad_stop_cond=0.0005,
-        lr=0.001,
+        rel_grad_stop_cond=0.001,
+        abs_grad_stop_cond=0.001,
+        lr=0.01,
         warm_start_vars_list=None,
     ):
         video = video.type(torch.float32).detach().to(self.device)
@@ -613,11 +619,15 @@ class HierarchicalGenerativeModel(object):
             gen_videos = self.generate_video(coefs_list, detached_phis_list, use_sparse=use_sparse)
 
             loss = torch.sum(torch.abs(gen_videos[0] - video))
+            print("coefs itr:", itr)
+            print("coefs L_0 loss:", torch.sum(torch.abs(gen_videos[0] - video)))
             for L in range(1, self.n_layers+1):
-                loss += 2**-L * torch.sum(torch.abs(torch.stack(vars_list[L-1], 0)))
+                loss += 10**-L * torch.sum(torch.abs(torch.stack(vars_list[L-1])))
+                print("coefs L_{} loss:".format(L), torch.sum(torch.abs(torch.stack(vars_list[L-1]))))
             loss /= batch_size
 
-            print("coefs itr {}:".format(itr), loss)
+            torch.cuda.empty_cache() # shouldn't help save GPU mem but somehow does
+
             loss.backward()
             old_vars_list = [[v.clone() for v in var] for var in vars_list]
             for optim in self.coefs_optimizers:
@@ -629,21 +639,13 @@ class HierarchicalGenerativeModel(object):
                 for (old_var, var) in zip(old_vars_list, vars_list)]):
                 break
 
-            # var_grads_list = []
-            # for L in range(self.n_layers):
-            #     var_grads_list.append(torch.stack([v.grad for v in vars_list[L]], 0))
-
-            # if all([(lr*torch.abs(var_grad) < abs_grad_stop_cond).all() for var_grad in var_grads_list]):
-            #     break
-            # if all([(lr*torch.abs(var_grad) / (1e-8 + torch.abs(torch.stack(var, 0))) < rel_grad_stop_cond).all()
-            #     for (var, var_grad) in zip(vars_list, var_grads_list)]):
-            #     break
+            torch.cuda.empty_cache() # shouldn't help save GPU mem but somehow does
 
         return vars_list, self.get_coefs_list(vars_list)
 
     def get_coefs_list(self, vars_list):
         coefs_list = []
-        for L in range(self.n_layers):
+        for L in range(len(vars_list)):
             coefs_list.append([
                 vars_list[L][0], # a
                 vars_list[L][1], # mu_T
@@ -658,7 +660,7 @@ class HierarchicalGenerativeModel(object):
 
     def get_vars_list(self, coefs_list):
         vars_list = []
-        for L in range(self.n_layers):
+        for L in range(len(coefs_list)):
             vars_list.append([
                 coefs_list[L][0], # a
                 coefs_list[L][1], # mu_T
@@ -691,20 +693,50 @@ class HierarchicalGenerativeModel(object):
 
         if not use_warm_start_optimizer:
             self.phis_optimizer = torch.optim.Adam(self.phis_list, lr=lr)
+            # self.phis_optimizers = [torch.optim.Adam([phis], lr=lr) for phis in self.phis_list]
 
         for itr in range(n_itr):
-            self.phis_optimizer.zero_grad()
             gen_videos = self.generate_video(coefs_list, self.phis_list, use_sparse=use_sparse)
-            loss = torch.mean(torch.abs(gen_videos[0] - video))
-            if True:
-                for L in range(1, self.n_layers):
-                    loss += 2**-L * torch.mean(torch.abs(gen_videos[L] - (gen_videos[L] + coefs_list[L-1]).detach()))
+
+            # for L in range(self.n_layers):
+            #     optim = self.phis_optimizers[L]
+            #     optim.zero_grad()
+
+            #     # if L == 0:
+            #     #     loss = torch.mean((gen_videos[0] - video)**2)
+            #     # else:
+            #     #     loss = torch.mean((gen_videos[L] - (gen_videos[L] + coefs_list[L-1]).detach())**2)
+            #     loss = torch.mean((gen_videos[0] - video)**2)
+            #     for L_sub in range(1, L+1):
+            #         loss += torch.mean((gen_videos[L_sub] - (gen_videos[L_sub] + coefs_list[L_sub-1]).detach())**2) 
+            #     # inference is flawed and doesnt put enough onto high-level even if it is possible to do so, so learning doesnt either...
+            #     # do we want to decay vars before learning phis? we are already using the "MAP" estimate, which should be "more sparse" than actuality...
+
+            #     torch.cuda.empty_cache() # shouldn't help save GPU mem but somehow does
+            #     print("phis layer_{} loss:".format(L), loss)
+            #     loss.backward(retain_graph=True)
+
+            #     phis = self.phis_list[L]
+            #     phis_plus_grad = phis.detach() + phis.grad
+            #     phis_plus_grad = phis_plus_grad / (1e-8 + torch.sqrt(torch.sum(phis_plus_grad**2, [4, 5, 6, 7])).unsqueeze(4).unsqueeze(5).unsqueeze(6).unsqueeze(7))
+            #     directional_grad = phis_plus_grad - phis.detach()
+            #     phis.grad = directional_grad
+
+            #     self.phis_optimizers[L].step()
+
+            self.phis_optimizer.zero_grad()
+
+            loss = torch.sum(torch.abs(gen_videos[0] - video))
+            phis_grad_coefs_list = [((gen_videos[L] + coefs_list[L-1]).detach() - gen_videos[L]) for L in range(1, self.n_layers)]
+            phis_grad_vars_list = self.get_vars_list(phis_grad_coefs_list)
+            for L in range(1, self.n_layers):
+                loss += 10**-L * torch.sum(torch.abs(torch.stack(phis_grad_vars_list[L-1])))
             print("phis itr {}:".format(itr), loss)
+            torch.cuda.empty_cache() # shouldn't help save GPU mem but somehow does
             loss.backward()
 
-
             phis_plus_grad_list = [phis.detach() + phis.grad for phis in self.phis_list]
-            phis_plus_grad_list = [phis / (1e-8 + torch.sum(torch.abs(phis), [4, 5, 6, 7]).unsqueeze(4).unsqueeze(5).unsqueeze(6).unsqueeze(7)) for phis in phis_plus_grad_list]
+            phis_plus_grad_list = [phis / (1e-8 + torch.sqrt(torch.sum(phis**2, [4, 5, 6, 7])).unsqueeze(4).unsqueeze(5).unsqueeze(6).unsqueeze(7)) for phis in phis_plus_grad_list]
             directional_grads_list = [phis_plus_grad - phis.detach() for (phis_plus_grad, phis) in zip(phis_plus_grad_list, self.phis_list)]
             for (phis, directional_grad) in zip(self.phis_list, directional_grads_list):
                 phis.grad = directional_grad
@@ -715,6 +747,6 @@ class HierarchicalGenerativeModel(object):
             for L in range(self.n_layers):
                 # phis: [[N_y, N_x], [CH], n_philters, t, n_y, n_x, ch]
                 self.phis_list[L].requires_grad = False
-                self.phis_list[L] /= \
-                    (1e-8 + torch.sum(torch.abs(self.phis_list[L]), [4, 5, 6, 7]).unsqueeze(
-                        4).unsqueeze(5).unsqueeze(6).unsqueeze(7))
+                self.phis_list[L] /= (1e-8 + torch.sqrt(torch.sum(self.phis_list[L]**2, [4, 5, 6, 7])).unsqueeze(4).unsqueeze(5).unsqueeze(6).unsqueeze(7))
+
+            torch.cuda.empty_cache() # shouldn't help save GPU mem but somehow does
