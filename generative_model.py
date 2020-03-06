@@ -568,10 +568,10 @@ class HierarchicalGenerativeModel(object):
         video,
         phis_list,
         use_sparse=True,
-        max_itr=50,
-        rel_grad_stop_cond=0.001,
-        abs_grad_stop_cond=0.001,
-        lr=0.01,
+        max_itr=1000,
+        rel_grad_stop_cond=0.0001,
+        abs_grad_stop_cond=0.0001,
+        lr=0.001,
         warm_start_vars_list=None,
     ):
         video = video.type(torch.float32).detach().to(self.device)
@@ -611,26 +611,35 @@ class HierarchicalGenerativeModel(object):
 
         import tqdm
         for itr in tqdm.tqdm(range(max_itr)):
-            # TODO: adjust vars blockwise?
-            for optim in self.coefs_optimizers:
-                optim.zero_grad()
+            print("coefs itr:", itr)
 
+            old_vars_list = [[v.clone() for v in var] for var in vars_list]
+
+            # update sequentially?
             coefs_list = self.get_coefs_list(vars_list)
             gen_videos = self.generate_video(coefs_list, detached_phis_list, use_sparse=use_sparse)
 
+            phis_grad_coefs_list = [((gen_videos[L] + coefs_list[L-1]).detach() - gen_videos[L]) for L in range(1, self.n_layers)]
+            phis_grad_vars_list = self.get_vars_list(phis_grad_coefs_list)
+
+            for L in range(self.n_layers):
+                optim = self.coefs_optimizers[L]
+                optim.zero_grad()
+
             loss = torch.sum(torch.abs(gen_videos[0] - video))
-            print("coefs itr:", itr)
-            print("coefs L_0 loss:", torch.sum(torch.abs(gen_videos[0] - video)))
-            for L in range(1, self.n_layers+1):
-                loss += 10**-L * torch.sum(torch.abs(torch.stack(vars_list[L-1])))
-                print("coefs L_{} loss:".format(L), torch.sum(torch.abs(torch.stack(vars_list[L-1]))))
+            print("reconstr L_0 loss:", loss)
+            for l in range(1, self.n_layers):
+                loss += np.e**-l * torch.sum(torch.abs(torch.stack(phis_grad_vars_list[l-1])))
+                print("reconstr L_{} loss:".format(l), torch.sum(torch.abs(torch.stack(phis_grad_vars_list[l-1]))))
+            for l in range(self.n_layers):
+                loss += np.e**-(l+1) * torch.sum(torch.abs(torch.stack(vars_list[l])))
+                print("vars_{} sparsity loss:".format(l), torch.sum(torch.abs(torch.stack(vars_list[l]))))
             loss /= batch_size
-
             torch.cuda.empty_cache() # shouldn't help save GPU mem but somehow does
-
             loss.backward()
-            old_vars_list = [[v.clone() for v in var] for var in vars_list]
-            for optim in self.coefs_optimizers:
+
+            for L in range(self.n_layers):
+                optim = self.coefs_optimizers[L]
                 optim.step()
 
             if all([(torch.abs(torch.stack(old_var, 0) - torch.stack(var, 0)) < abs_grad_stop_cond).all() for (old_var, var) in zip(old_vars_list, vars_list)]):
@@ -691,47 +700,30 @@ class HierarchicalGenerativeModel(object):
             for coef in range(8):
                 coefs_list[L][coef] = coefs_list[L][coef].detach()
 
+        # TODO: remove?
+        vars_list = self.get_vars_list(coefs_list)
+        for L in range(self.n_layers):
+            for i in range(8):
+                vars_list[L][i] *= (1 - 0.1 * np.e**-(L+1))
+        coefs_list = self.get_coefs_list(vars_list)
+
         if not use_warm_start_optimizer:
             self.phis_optimizer = torch.optim.Adam(self.phis_list, lr=lr)
-            # self.phis_optimizers = [torch.optim.Adam([phis], lr=lr) for phis in self.phis_list]
 
         for itr in range(n_itr):
+            print("phis itr:", itr)
+
             gen_videos = self.generate_video(coefs_list, self.phis_list, use_sparse=use_sparse)
-
-            # for L in range(self.n_layers):
-            #     optim = self.phis_optimizers[L]
-            #     optim.zero_grad()
-
-            #     # if L == 0:
-            #     #     loss = torch.mean((gen_videos[0] - video)**2)
-            #     # else:
-            #     #     loss = torch.mean((gen_videos[L] - (gen_videos[L] + coefs_list[L-1]).detach())**2)
-            #     loss = torch.mean((gen_videos[0] - video)**2)
-            #     for L_sub in range(1, L+1):
-            #         loss += torch.mean((gen_videos[L_sub] - (gen_videos[L_sub] + coefs_list[L_sub-1]).detach())**2) 
-            #     # inference is flawed and doesnt put enough onto high-level even if it is possible to do so, so learning doesnt either...
-            #     # do we want to decay vars before learning phis? we are already using the "MAP" estimate, which should be "more sparse" than actuality...
-
-            #     torch.cuda.empty_cache() # shouldn't help save GPU mem but somehow does
-            #     print("phis layer_{} loss:".format(L), loss)
-            #     loss.backward(retain_graph=True)
-
-            #     phis = self.phis_list[L]
-            #     phis_plus_grad = phis.detach() + phis.grad
-            #     phis_plus_grad = phis_plus_grad / (1e-8 + torch.sqrt(torch.sum(phis_plus_grad**2, [4, 5, 6, 7])).unsqueeze(4).unsqueeze(5).unsqueeze(6).unsqueeze(7))
-            #     directional_grad = phis_plus_grad - phis.detach()
-            #     phis.grad = directional_grad
-
-            #     self.phis_optimizers[L].step()
 
             self.phis_optimizer.zero_grad()
 
             loss = torch.sum(torch.abs(gen_videos[0] - video))
+            print("reconstr L_0 loss:", loss)
             phis_grad_coefs_list = [((gen_videos[L] + coefs_list[L-1]).detach() - gen_videos[L]) for L in range(1, self.n_layers)]
             phis_grad_vars_list = self.get_vars_list(phis_grad_coefs_list)
-            for L in range(1, self.n_layers):
-                loss += 10**-L * torch.sum(torch.abs(torch.stack(phis_grad_vars_list[L-1])))
-            print("phis itr {}:".format(itr), loss)
+            for l in range(1, self.n_layers):
+                loss += np.e**-l * torch.sum(torch.abs(torch.stack(phis_grad_vars_list[l-1])))
+                print("reconstr L_{} loss:".format(l), torch.sum(torch.abs(torch.stack(phis_grad_vars_list[l-1]))))
             torch.cuda.empty_cache() # shouldn't help save GPU mem but somehow does
             loss.backward()
 

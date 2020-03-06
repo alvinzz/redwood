@@ -46,8 +46,10 @@ for batch_idx, (data, target) in tqdm.tqdm(enumerate(train_loader)):
     video = data.permute(0, 2, 3, 1).unsqueeze(1) # [batch, T, N_y, N_x, CH]
 
     print("batch_idx:", batch_idx)
-    inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list, max_itr=250, use_sparse=True)
-    hgm.update_phis(video, inferred_coefs_list, use_warm_start_optimizer=(batch_idx > 1), use_sparse=True)
+    inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list, use_sparse=True,
+        lr=0.01, max_itr=100, abs_grad_stop_cond=0.001, rel_grad_stop_cond=0.001)
+    hgm.update_phis(video, inferred_coefs_list, use_sparse=True,
+        use_warm_start_optimizer=(batch_idx > 1), lr=0.01)
 
     torch.save(hgm.phis_list, "mnist/phis_list_{}.torch".format(batch_idx))
     torch.save(inferred_coefs_list, "mnist/inferred_coefs_list_{}.torch".format(batch_idx))
