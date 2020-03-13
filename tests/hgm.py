@@ -347,3 +347,52 @@ hgm.generate_video(inferred_coefs_list, hgm.phis_list, plot_save_dir="hgm/rand_i
 #vars_0 sparsity loss: tensor(0.5011, grad_fn=<SumBackward0>)
 #vars_1 sparsity loss: tensor(0.3072, grad_fn=<SumBackward0>)
 #poor deep reconstr
+
+# 100 itr, L_decay=np.e, coefs_lr=0.001, coefs_itr=100, phis_lr=0.01, vars_decay=(1 - 0.1 * 2**-(L+1)) before learning phis
+#reconstr L_0 loss: tensor(0.0871, grad_fn=<SumBackward0>)
+#reconstr L_1 loss: tensor(0.4123, grad_fn=<SumBackward0>)
+#vars_0 sparsity loss: tensor(0.4123, grad_fn=<SumBackward0>)
+#vars_1 sparsity loss: tensor(0.3895, grad_fn=<SumBackward0>)
+#freeze phis, coefs_lr=0.001, coefs_itr=1000
+#reconstr L_0 loss: tensor(0.0719, grad_fn=<SumBackward0>)
+#reconstr L_1 loss: tensor(0.3493, grad_fn=<SumBackward0>)
+#vars_0 sparsity loss: tensor(0.3493, grad_fn=<SumBackward0>)
+#vars_1 sparsity loss: tensor(0.3765, grad_fn=<SumBackward0>)
+#decent deep reconstr
+
+# 100 itr, L_decay=np.e, coefs_lr=0.1, coefs_itr=100, phis_lr=0.01, vars_decay=(1 - 0.1 * 2**-(L+1)) before learning phis
+#reconstr L_0 loss: tensor(1.3607, grad_fn=<SumBackward0>)
+#reconstr L_1 loss: tensor(7.0917, grad_fn=<SumBackward0>)
+#vars_0 sparsity loss: tensor(7.0917, grad_fn=<SumBackward0>)
+#vars_1 sparsity loss: tensor(5.2476, grad_fn=<SumBackward0>)
+#freeze phis, coefs_lr=0.001, coefs_itr=1000
+#reconstr L_0 loss: tensor(0.0127, grad_fn=<SumBackward0>)
+#reconstr L_1 loss: tensor(0.1390, grad_fn=<SumBackward0>)
+#vars_0 sparsity loss: tensor(0.1390, grad_fn=<SumBackward0>)
+#vars_1 sparsity loss: tensor(2.6293, grad_fn=<SumBackward0>)
+# good deep reconstr
+
+##### NORMALIZE LOSSES BY NUMEL #####
+# 100 itr, L_decay=np.e, coefs_lr=0.01, coefs_itr=100, phis_lr=0.01, vars_decay=(1 - 0.1 * 2**-(L+1)) before learning phis
+#reconstr L_0 loss: tensor(0.1295, grad_fn=<SumBackward0>)
+#reconstr L_1 loss: tensor(0.6210, grad_fn=<SumBackward0>)
+#vars_0 sparsity loss: tensor(0.6210, grad_fn=<SumBackward0>)
+#vars_1 sparsity loss: tensor(0.9217, grad_fn=<SumBackward0>)
+#freeze phis, coefs_lr=0.001, coefs_itr=1000
+#reconstr L_0 loss: tensor(0.0363, grad_fn=<SumBackward0>)
+#reconstr L_1 loss: tensor(0.0606, grad_fn=<SumBackward0>)
+#vars_0 sparsity loss: tensor(0.0606, grad_fn=<SumBackward0>)
+#vars_1 sparsity loss: tensor(0.7042, grad_fn=<SumBackward0>)
+#good deep reconstr
+
+# minor bugfix (different normalization constant)
+#reconstr L_0 loss: tensor(0.4363, grad_fn=<SumBackward0>)
+#reconstr L_1 loss: tensor(0.7391, grad_fn=<SumBackward0>)
+#vars_0 sparsity loss: tensor(0.7391, grad_fn=<SumBackward0>)
+#vars_1 sparsity loss: tensor(1.2151, grad_fn=<SumBackward0>)
+#freeze phis, coefs_lr=0.001, coefs_itr=1000
+#reconstr L_0 loss: tensor(0.0457, grad_fn=<SumBackward0>)
+#reconstr L_1 loss: tensor(0.0668, grad_fn=<SumBackward0>)
+#vars_0 sparsity loss: tensor(0.0668, grad_fn=<SumBackward0>)
+#vars_1 sparsity loss: tensor(0.9424, grad_fn=<SumBackward0>)
+#good deep reconstr
