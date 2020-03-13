@@ -568,10 +568,10 @@ class HierarchicalGenerativeModel(object):
         video,
         phis_list,
         use_sparse=True,
-        max_itr=1000,
-        rel_grad_stop_cond=0.0001,
-        abs_grad_stop_cond=0.0001,
-        lr=0.001,
+        max_itr=100,
+        rel_grad_stop_cond=0.001,
+        abs_grad_stop_cond=0.001,
+        lr=0.01,
         warm_start_vars_list=None,
     ):
         video = video.type(torch.float32).detach().to(self.device)
@@ -607,7 +607,7 @@ class HierarchicalGenerativeModel(object):
         else:
             vars_list = warm_start_vars_list
 
-        detached_phis_list = [phis.detach() for phis in phis_list]
+        phis_list = [phis.detach() for phis in phis_list]
 
         import tqdm
         for itr in tqdm.tqdm(range(max_itr)):
@@ -617,7 +617,9 @@ class HierarchicalGenerativeModel(object):
 
             # update sequentially?
             coefs_list = self.get_coefs_list(vars_list)
-            gen_videos = self.generate_video(coefs_list, detached_phis_list, use_sparse=use_sparse)
+            gen_videos = self.generate_video(coefs_list, phis_list, use_sparse=use_sparse)
+            total_vars_size = np.e**-self.n_layers * 8*coefs_list[-1][0].numel() + \
+                sum([np.e**-L * gen_videos[L].numel() for L in range(self.n_layers)])
 
             phis_grad_coefs_list = [((gen_videos[L] + coefs_list[L-1]).detach() - gen_videos[L]) for L in range(1, self.n_layers)]
             phis_grad_vars_list = self.get_vars_list(phis_grad_coefs_list)
@@ -634,7 +636,8 @@ class HierarchicalGenerativeModel(object):
             for l in range(self.n_layers):
                 loss += np.e**-(l+1) * torch.sum(torch.abs(torch.stack(vars_list[l])))
                 print("vars_{} sparsity loss:".format(l), torch.sum(torch.abs(torch.stack(vars_list[l]))))
-            loss /= batch_size
+            loss /= (batch_size * total_vars_size)
+            print(loss)
             torch.cuda.empty_cache() # shouldn't help save GPU mem but somehow does
             loss.backward()
 
@@ -694,13 +697,13 @@ class HierarchicalGenerativeModel(object):
         use_warm_start_optimizer=True,
     ):
         video = video.type(torch.float32).detach().to(self.device)
+        batch_size, video_T, video_N_y, video_N_x, video_CH = video.shape
 
         for L in range(self.n_layers):
             self.phis_list[L].requires_grad = True
             for coef in range(8):
                 coefs_list[L][coef] = coefs_list[L][coef].detach()
 
-        # TODO: remove?
         vars_list = self.get_vars_list(coefs_list)
         for L in range(self.n_layers):
             for i in range(8):
@@ -714,6 +717,8 @@ class HierarchicalGenerativeModel(object):
             print("phis itr:", itr)
 
             gen_videos = self.generate_video(coefs_list, self.phis_list, use_sparse=use_sparse)
+            total_vars_size = np.e**-self.n_layers * 8*coefs_list[-1][0].numel() + \
+                sum([np.e**-L * gen_videos[L].numel() for L in range(self.n_layers)])
 
             self.phis_optimizer.zero_grad()
 
@@ -724,6 +729,7 @@ class HierarchicalGenerativeModel(object):
             for l in range(1, self.n_layers):
                 loss += np.e**-l * torch.sum(torch.abs(torch.stack(phis_grad_vars_list[l-1])))
                 print("reconstr L_{} loss:".format(l), torch.sum(torch.abs(torch.stack(phis_grad_vars_list[l-1]))))
+            loss /= (batch_size * total_vars_size)
             torch.cuda.empty_cache() # shouldn't help save GPU mem but somehow does
             loss.backward()
 
