@@ -574,6 +574,7 @@ class HierarchicalGenerativeModel(object):
         lr=0.01,
         warm_start_vars_list=None,
     ):
+        # TODO: try to make faster and better (adaptive lr, or video)
         video = video.type(torch.float32).detach().to(self.device)
         batch_size, video_T, video_N_y, video_N_x, video_CH = video.shape
 
