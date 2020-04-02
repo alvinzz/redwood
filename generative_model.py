@@ -569,16 +569,18 @@ class HierarchicalGenerativeModel(object):
         phis_list,
         use_sparse=True,
         max_itr=100,
-        rel_grad_stop_cond=0.001,
-        abs_grad_stop_cond=0.001,
-        lr=0.01,
-        warm_start_vars_list=None,
+        vars_rel_stop_cond=0.01,
+        vars_abs_stop_cond=0.0,
+        loss_rel_stop_cond=0.01,
+        loss_abs_stop_cond=0.0,
+        loss_stop_cond_window=5,
+        init_lr=0.01,
+        vars_list=None,
     ):
-        # TODO: try to make faster and better (adaptive lr, or video)
         video = video.type(torch.float32).detach().to(self.device)
         batch_size, video_T, video_N_y, video_N_x, video_CH = video.shape
 
-        if not warm_start_vars_list:
+        if vars_list is None:
             vars_list = []
             for L in range(self.n_layers):
                 # create variables
@@ -604,19 +606,15 @@ class HierarchicalGenerativeModel(object):
                 vars_list.append([a, mu_T, mu_Y, mu_X, log_sigma_T, log_sigma_Y, log_sigma_X, raw_rot])
                 next_T, next_N_y, next_N_x, next_CH = T, N_y, N_x, 8*CH*n_philters
 
-                self.coefs_optimizers = [torch.optim.Adam(v, lr=lr) for v in vars_list]
-        else:
-            vars_list = warm_start_vars_list
-
         phis_list = [phis.detach() for phis in phis_list]
 
-        import tqdm
-        for itr in tqdm.tqdm(range(max_itr)):
+        lrs = [[init_lr*torch.ones_like(v).detach() for v in var] for var in vars_list]
+        last_losses = []
+        # TODO: try adding momentum
+        for itr in range(max_itr):
             print("coefs itr:", itr)
 
-            old_vars_list = [[v.clone() for v in var] for var in vars_list]
-
-            # update sequentially?
+            torch.cuda.empty_cache() # shouldn't help save GPU mem but somehow does
             coefs_list = self.get_coefs_list(vars_list)
             gen_videos = self.generate_video(coefs_list, phis_list, use_sparse=use_sparse)
             total_vars_size = np.e**-self.n_layers * 8*coefs_list[-1][0].numel() + \
@@ -624,10 +622,6 @@ class HierarchicalGenerativeModel(object):
 
             phis_grad_coefs_list = [((gen_videos[L] + coefs_list[L-1]).detach() - gen_videos[L]) for L in range(1, self.n_layers)]
             phis_grad_vars_list = self.get_vars_list(phis_grad_coefs_list)
-
-            for L in range(self.n_layers):
-                optim = self.coefs_optimizers[L]
-                optim.zero_grad()
 
             loss = torch.sum(torch.abs(gen_videos[0] - video))
             print("reconstr L_0 loss:", loss)
@@ -642,17 +636,46 @@ class HierarchicalGenerativeModel(object):
             torch.cuda.empty_cache() # shouldn't help save GPU mem but somehow does
             loss.backward()
 
+            grad_signs = []
             for L in range(self.n_layers):
-                optim = self.coefs_optimizers[L]
-                optim.step()
+                grad_signs.append([])
+                for v in range(8):
+                    grad_signs[L].append(torch.sign(vars_list[L][v].grad.detach()))
+                    with torch.no_grad():
+                        vars_list[L][v] -= lrs[L][v]*vars_list[L][v].grad
+                    vars_list[L][v].grad = torch.zeros_like(vars_list[L][v].grad)
+                grad_signs[L] = torch.stack(grad_signs[L])
 
-            if all([(torch.abs(torch.stack(old_var, 0) - torch.stack(var, 0)) < abs_grad_stop_cond).all() for (old_var, var) in zip(old_vars_list, vars_list)]):
-                break
-            if all([(torch.abs(torch.stack(old_var, 0) - torch.stack(var, 0)) / (1e-8 + torch.abs(torch.stack(var, 0))) < rel_grad_stop_cond).all()
-                for (old_var, var) in zip(old_vars_list, vars_list)]):
-                break
 
-            torch.cuda.empty_cache() # shouldn't help save GPU mem but somehow does
+            loss = loss.detach().cpu().numpy()
+            last_losses.append(loss)
+            if len(last_losses) > 2*loss_stop_cond_window:
+                last_losses.pop(0)
+
+            if itr > 0:
+                if all([(torch.abs(torch.stack(last_var, 0) - torch.stack(var, 0)) < vars_abs_stop_cond).all() for (last_var, var) in zip(last_vars_list, vars_list)]):
+                    break
+                if all([(torch.abs(torch.stack(last_var, 0) - torch.stack(var, 0)) / (1e-8 + torch.abs(torch.stack(last_var, 0))) < vars_rel_stop_cond).all()
+                    for (last_var, var) in zip(last_vars_list, vars_list)]):
+                    break
+
+                for L in range(self.n_layers):
+                    for v in range(8):
+                        lrs[L][v] *= torch.where(grad_signs[L][v] * last_grad_signs[L][v] > 0, 1.2*torch.ones_like(grad_signs[L][v].detach()), 0.5*torch.ones_like(grad_signs[L][v].detach()))
+                        lrs[L][v] = torch.clamp(lrs[L][v], 0.0, 1.0)
+
+            # stop condition: compared to the avg loss during the T-2N to T-N period, the avg of the past N losses does not improve significantly
+            if len(last_losses) >= 2*loss_stop_cond_window:
+                prev_losses_mean = np.mean(last_losses[:loss_stop_cond_window])
+                new_losses_mean = np.mean(last_losses[loss_stop_cond_window:])
+                if prev_losses_mean - new_losses_mean < loss_abs_stop_cond:
+                    break
+                if (prev_losses_mean - new_losses_mean) / (1e-8 + prev_losses_mean) < loss_rel_stop_cond:
+                    break
+
+            last_vars_list = [[v.detach().clone() for v in var] for var in vars_list]
+            last_grad_signs = grad_signs
+            last_loss = loss
 
         return vars_list, self.get_coefs_list(vars_list)
 
