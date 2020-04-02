@@ -3,7 +3,7 @@ from viz import viz_phis
 
 import torch
 
-device = "cpu"
+device = "cuda"
 
 # a: [batch, T, N_y, N_x, [CH], n_philters]
 # phis: [[N_y, N_x], [CH], n_philters, t, n_y, n_x, ch]
@@ -91,7 +91,7 @@ video = hgm.generate_video(coefs_list, hgm.phis_list, plot_save_dir="hgm/referen
 
 ######### infer coefs + phis, phis starting from reference initialization ###########
 #inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list,
-#    max_itr=100, lr=0.01, abs_grad_stop_cond=0., rel_grad_stop_cond=0., use_sparse=False)
+#    max_itr=100, lr=0.01, vars_abs_stop_cond=0., vars_rel_stop_cond=0., use_sparse=False)
 #print("vars0_norm", torch.abs(torch.stack(inferred_vars_list[0])).sum())
 #print("vars1_norm", torch.abs(torch.stack(inferred_vars_list[1])).sum())
 #print(inferred_vars_list[1])
@@ -106,28 +106,32 @@ hgm = HGM(
     [1, 1], [1, 1], [1, 1], [1, 1], [1, 1], [1, 1],
     device=device
 )
-#inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list)
-#hgm.update_phis(video, inferred_coefs_list, use_warm_start_optimizer=False)
+# inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list, use_sparse=False)
+# hgm.update_phis(video, inferred_coefs_list, use_warm_start_optimizer=False, use_sparse=False)
 
-#import tqdm
-#for itr in tqdm.tqdm(range(100)):
+# import tqdm
+# for itr in tqdm.tqdm(range(100)):
 #    print("Itr:", itr)
-#    inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list)
-#    hgm.update_phis(video, inferred_coefs_list, use_warm_start_optimizer=True)
+#    inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list, use_sparse=False)
+#    hgm.update_phis(video, inferred_coefs_list, use_warm_start_optimizer=True, use_sparse=False)
 
-#inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list)
-#torch.save(inferred_vars_list, "hgm/rand_init/vars_list.torch")
-#torch.save(inferred_coefs_list, "hgm/rand_init/coefs_list.torch")
-#torch.save(hgm.phis_list, "hgm/rand_init/phis_list.torch")
-## TODO: plot_coefs
-#viz_phis(hgm.phis_list[0], "hgm/rand_init/phis0")
-## viz_phis(hgm.phis_list[1], "hgm/rand_init/phis1")
-#hgm.generate_video(inferred_coefs_list, hgm.phis_list, plot_save_dir="hgm/rand_init/video")
+# inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list, use_sparse=False)
+# torch.save(inferred_vars_list, "hgm/rand_init/vars_list.torch")
+# torch.save(inferred_coefs_list, "hgm/rand_init/coefs_list.torch")
+# torch.save(hgm.phis_list, "hgm/rand_init/phis_list.torch")
+# # TODO: plot_coefs
+# viz_phis(hgm.phis_list[0], "hgm/rand_init/phis0")
+# # viz_phis(hgm.phis_list[1], "hgm/rand_init/phis1")
+# hgm.generate_video(inferred_coefs_list, hgm.phis_list, plot_save_dir="hgm/rand_init/video")
 
 hgm.phis_list = torch.load(open("hgm/rand_init/phis_list.torch", "rb"))
 for i in range(2):
     hgm.phis_list[i] = hgm.phis_list[i].to(device)
-inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list, max_itr=1000, lr=0.001, abs_grad_stop_cond=0., rel_grad_stop_cond=0.)
+inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list, 
+    max_itr=1000, init_lr=0.001, 
+    vars_abs_stop_cond=0.0, vars_rel_stop_cond=0.0, 
+    loss_abs_stop_cond=0.0, loss_rel_stop_cond=0.0, 
+    use_sparse=False)
 inferred_coefs_list[0][0] = torch.zeros_like(inferred_coefs_list[0][0])
 inferred_coefs_list[0][1] = torch.zeros_like(inferred_coefs_list[0][1])
 inferred_coefs_list[0][2] = torch.zeros_like(inferred_coefs_list[0][2])

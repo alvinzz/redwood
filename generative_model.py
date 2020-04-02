@@ -573,7 +573,8 @@ class HierarchicalGenerativeModel(object):
         vars_abs_stop_cond=0.0,
         loss_rel_stop_cond=0.01,
         loss_abs_stop_cond=0.0,
-        loss_stop_cond_window=5,
+        loss_stop_cond_window=10,
+        momentum_decay=0.9,
         init_lr=0.01,
         vars_list=None,
     ):
@@ -608,8 +609,10 @@ class HierarchicalGenerativeModel(object):
 
         phis_list = [phis.detach() for phis in phis_list]
 
-        lrs = [[init_lr*torch.ones_like(v).detach() for v in var] for var in vars_list]
+        lrs = [[init_lr*torch.ones_like(v).detach().to("cpu") for v in var] for var in vars_list]
         last_losses = []
+        last_vars = []
+        momentum = [[torch.zeros_like(v).detach().to("cpu") for v in var] for var in vars_list]
         # TODO: try adding momentum
         for itr in range(max_itr):
             print("coefs itr:", itr)
@@ -635,6 +638,15 @@ class HierarchicalGenerativeModel(object):
             print(loss)
             torch.cuda.empty_cache() # shouldn't help save GPU mem but somehow does
             loss.backward()
+            torch.cuda.empty_cache() # shouldn't help save GPU mem but somehow does
+
+            last_vars.append([[v.detach().clone().to("cpu") for v in var] for var in vars_list])
+            if len(last_vars) > 2*loss_stop_cond_window:
+                last_vars.pop(0)
+
+            last_losses.append(loss.detach().cpu().numpy())
+            if len(last_losses) > 2*loss_stop_cond_window:
+                last_losses.pop(0)
 
             grad_signs = []
             for L in range(self.n_layers):
@@ -642,27 +654,25 @@ class HierarchicalGenerativeModel(object):
                 for v in range(8):
                     grad_signs[L].append(torch.sign(vars_list[L][v].grad.detach()))
                     with torch.no_grad():
-                        vars_list[L][v] -= lrs[L][v]*vars_list[L][v].grad
+                        momentum[L][v] = momentum_decay*momentum[L][v] + lrs[L][v]*vars_list[L][v].grad.to("cpu")
+                        vars_list[L][v] -= momentum[L][v].to(self.device)
                     vars_list[L][v].grad = torch.zeros_like(vars_list[L][v].grad)
                 grad_signs[L] = torch.stack(grad_signs[L])
 
-
-            loss = loss.detach().cpu().numpy()
-            last_losses.append(loss)
-            if len(last_losses) > 2*loss_stop_cond_window:
-                last_losses.pop(0)
-
             if itr > 0:
-                if all([(torch.abs(torch.stack(last_var, 0) - torch.stack(var, 0)) < vars_abs_stop_cond).all() for (last_var, var) in zip(last_vars_list, vars_list)]):
-                    break
-                if all([(torch.abs(torch.stack(last_var, 0) - torch.stack(var, 0)) / (1e-8 + torch.abs(torch.stack(last_var, 0))) < vars_rel_stop_cond).all()
-                    for (last_var, var) in zip(last_vars_list, vars_list)]):
-                    break
-
                 for L in range(self.n_layers):
                     for v in range(8):
-                        lrs[L][v] *= torch.where(grad_signs[L][v] * last_grad_signs[L][v] > 0, 1.2*torch.ones_like(grad_signs[L][v].detach()), 0.5*torch.ones_like(grad_signs[L][v].detach()))
+                        lrs[L][v] *= torch.where(grad_signs[L][v] * last_grad_signs[L][v] > 0,
+                            1.2*torch.ones_like(grad_signs[L][v].detach()),
+                            0.5*torch.ones_like(grad_signs[L][v].detach())).to("cpu")
                         lrs[L][v] = torch.clamp(lrs[L][v], 0.0, 1.0)
+
+            if len(last_vars) >= 2:
+                if all([(torch.abs(torch.stack(last_var, 0) - torch.stack(var, 0)) < vars_abs_stop_cond).all() for (last_var, var) in zip(last_vars[-2], last_vars[-1])]):
+                    break
+                if all([(torch.abs(torch.stack(last_var, 0) - torch.stack(var, 0)) / (1e-8 + torch.abs(torch.stack(last_var, 0))) < vars_rel_stop_cond).all()
+                    for (last_var, var) in zip(last_vars[-2], last_vars[-1])]):
+                    break
 
             # stop condition: compared to the avg loss during the T-2N to T-N period, the avg of the past N losses does not improve significantly
             if len(last_losses) >= 2*loss_stop_cond_window:
@@ -673,9 +683,13 @@ class HierarchicalGenerativeModel(object):
                 if (prev_losses_mean - new_losses_mean) / (1e-8 + prev_losses_mean) < loss_rel_stop_cond:
                     break
 
-            last_vars_list = [[v.detach().clone() for v in var] for var in vars_list]
             last_grad_signs = grad_signs
-            last_loss = loss
+
+        best_idx = np.argmin(last_losses)
+        vars_list = last_vars[best_idx]
+        for L in range(self.n_layers):
+            for v in range(8):
+                vars_list[L][v] = vars_list[L][v].to(self.device)
 
         return vars_list, self.get_coefs_list(vars_list)
 

@@ -29,7 +29,7 @@ for (batch_idx, video) in tqdm.tqdm(enumerate(videos)):
 
         print("batch_idx:", batch_idx)
         inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list, use_sparse=True,
-            lr=0.01, max_itr=100, abs_grad_stop_cond=0.001, rel_grad_stop_cond=0.001)
+            lr=0.01, max_itr=100, vars_abs_stop_cond=0.001, vars_rel_stop_cond=0.001)
         hgm.update_phis(video, inferred_coefs_list, use_sparse=True,
             use_warm_start_optimizer=warm_start, lr=0.01)
 

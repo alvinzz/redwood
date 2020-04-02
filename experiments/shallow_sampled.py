@@ -63,7 +63,7 @@ for epoch in range(1000):
             if False and 5000*epoch + batch_idx == max(load_idx-1, 0):
                 pickle.dump(video[0, 0, :, :, 0], open("shallow/lr_01_shallow_sampled_video_{}.pkl".format(load_idx), "wb"))
                 inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list, use_sparse=False,
-                    lr=0.001, max_itr=10000, abs_grad_stop_cond=0.0001, rel_grad_stop_cond=0.0001)
+                    lr=0.001, max_itr=10000, vars_abs_stop_cond=0.0001, vars_rel_stop_cond=0.0001)
                 torch.save(inferred_coefs_list, "shallow/lr_01_shallow_sampled_inferred_coefs_list_{}.torch".format(load_idx))
                 reconstr_video = hgm.generate_video(inferred_coefs_list, hgm.phis_list, use_sparse=False)[0]
                 pickle.dump(reconstr_video[0, 0, :, :, 0], open("shallow/lr_01_shallow_sampled_reconstr_video_{}.pkl".format(load_idx), "wb"))
@@ -72,9 +72,9 @@ for epoch in range(1000):
             if 5000*epoch + batch_idx >= load_idx:
                 print("batch_idx:", 5000*epoch + batch_idx)
                 #inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list, use_sparse=False,
-                #    lr=0.001, max_itr=1000, abs_grad_stop_cond=0.0001, rel_grad_stop_cond=0.0001)
+                #    lr=0.001, max_itr=1000, vars_abs_stop_cond=0.0001, vars_rel_stop_cond=0.0001)
                 inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list, use_sparse=False,
-                    lr=0.01, max_itr=100, abs_grad_stop_cond=0.001, rel_grad_stop_cond=0.001)
+                    lr=0.01, max_itr=100, vars_abs_stop_cond=0.001, vars_rel_stop_cond=0.001)
                 #hgm.update_phis(video, inferred_coefs_list, use_sparse=False,
                 #    use_warm_start_optimizer=warm_start, lr=0.01)
                 hgm.update_phis(video, inferred_coefs_list, use_sparse=False,

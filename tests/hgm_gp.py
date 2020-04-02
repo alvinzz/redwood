@@ -29,7 +29,7 @@ from viz import viz_phis
 
 import torch
 
-device = "cpu"
+device = "cuda"
 hgm = HGM(
     [
         torch.normal(torch.zeros(20, 1, 1, 3, 1), torch.ones(20, 1, 1, 3, 1)),
@@ -40,23 +40,31 @@ hgm = HGM(
     device=device
 )
 
+plt.imshow(pickle.load(open("hgm_gp/data.pkl", "rb"))[::10], cmap="gray", vmin=0, vmax=1)
+plt.show()
+
 videos = torch.tensor(pickle.load(open("hgm_gp/data.pkl", "rb")), dtype=torch.float32, device=device)
 videos = videos.reshape(100, 1, 1, 9, 1)
 
 if False:
     import tqdm
-    for itr in tqdm.tqdm(range(1)):
+    for itr in range(1):
         print("Itr:", itr)
         for v in range(videos.shape[0]):
             print("Video:", v)
             video = videos[v:v+1]
             inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(video, hgm.phis_list,
-                max_itr=100, lr=0.01, abs_grad_stop_cond=0.001, rel_grad_stop_cond=0.001)
-            hgm.update_phis(video, inferred_coefs_list, use_warm_start_optimizer=(itr>0 or v>0))
+                max_itr=100, init_lr=0.01,
+                vars_rel_stop_cond=0.05,
+                vars_abs_stop_cond=0.0,
+                loss_rel_stop_cond=0.05,
+                loss_abs_stop_cond=0.0,
+                use_sparse=False)
+            hgm.update_phis(video, inferred_coefs_list, use_warm_start_optimizer=(itr>0 or v>0), use_sparse=False)
 
-    inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(videos[0:1], hgm.phis_list)
-    torch.save(inferred_vars_list, "hgm_gp/rand_init/vars_list.torch")
-    torch.save(inferred_coefs_list, "hgm_gp/rand_init/coefs_list.torch")
+    # inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(videos[0:1], hgm.phis_list)
+    # torch.save(inferred_vars_list, "hgm_gp/rand_init/vars_list.torch")
+    # torch.save(inferred_coefs_list, "hgm_gp/rand_init/coefs_list.torch")
     torch.save(hgm.phis_list, "hgm_gp/rand_init/100_01_01_phis_list_1.torch")
     # TODO: plot_coefs
     # viz_phis(hgm.phis_list[0], "hgm_gp/rand_init/phis0")
@@ -68,7 +76,12 @@ if False:
     for i in range(2):
         hgm.phis_list[i] = hgm.phis_list[i].to(device)
     inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(videos[::10], hgm.phis_list,
-        max_itr=1000, lr=0.001, abs_grad_stop_cond=0., rel_grad_stop_cond=0.)
+        max_itr=1000, init_lr=0.001,
+        vars_abs_stop_cond=0.0,
+        vars_rel_stop_cond=0.0,
+        loss_rel_stop_cond=0.0,
+        loss_abs_stop_cond=0.0,
+        use_sparse=False)
     inferred_coefs_list[0][0] = torch.zeros_like(inferred_coefs_list[0][0])
     inferred_coefs_list[0][1] = torch.zeros_like(inferred_coefs_list[0][1])
     inferred_coefs_list[0][2] = torch.zeros_like(inferred_coefs_list[0][2])
@@ -79,14 +92,14 @@ if False:
     inferred_coefs_list[0][7] = torch.zeros_like(inferred_coefs_list[0][7])
     hgm.generate_video(inferred_coefs_list, hgm.phis_list, plot_save_dir="hgm_gp/rand_init/video_100_01_01_1")
 
-if True:
+if False:
     vs = []
-    for ch in range(20):
+    for ch in range(50):
         hgm.phis_list = torch.load(open("hgm_gp/rand_init/100_01_01_phis_list_1.torch", "rb"))
         for i in range(2):
             hgm.phis_list[i] = hgm.phis_list[i].to(device)
         inferred_vars_list, inferred_coefs_list = hgm.infer_coefs(videos[0:1], hgm.phis_list,
-            max_itr=1, lr=0., abs_grad_stop_cond=0., rel_grad_stop_cond=0.)
+            max_itr=1, init_lr=0., vars_abs_stop_cond=0., vars_rel_stop_cond=0., use_sparse=False)
         inferred_coefs_list[0][0] = torch.zeros_like(inferred_coefs_list[0][0])
         inferred_coefs_list[0][1] = torch.zeros_like(inferred_coefs_list[0][1])
         inferred_coefs_list[0][2] = torch.zeros_like(inferred_coefs_list[0][2])
@@ -105,7 +118,7 @@ if True:
         inferred_coefs_list[1][6] = torch.ones_like(inferred_coefs_list[1][6])
         inferred_coefs_list[1][7] = torch.zeros_like(inferred_coefs_list[1][7])
 
-        inferred_coefs_list[0][0][0, 0, 0, 0, 0, ch] = 1
+        inferred_coefs_list[1][0][0, 0, 0, 0, 0, ch] = 1
         v = hgm.generate_video(inferred_coefs_list, hgm.phis_list)[0]
         v = np.squeeze(v.detach().cpu().numpy())
         v -= np.min(v)
